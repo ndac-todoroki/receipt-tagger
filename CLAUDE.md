@@ -26,7 +26,8 @@
 
 ## 実行環境
 
-- **構成**: 推論APIは FastAPI（APIのみ）、フロントエンドは Solid.js
+- **構成**: 推論APIは FastAPI。フロントエンドは Solid.js で作り、ビルド成果物を FastAPI から静的配信する（コンテナ1つ）
+- **モデル**: 多段パイプラインは設計どおり。まずは既存モデルを推論に使うだけで端から端まで通し、ファインチューニングは余裕があれば行う（最初の対象は品目ジャンル分類）
 - **デプロイ**: DGX Spark 上の docker compose を Cloudflare Tunnel で公開する（方針A）
 - **開発**: Windows（この機）。uv、Node、Docker あり
 - **学習・実験**: DGX Spark（aarch64 / Ubuntu 24.04 / NVIDIA GB10 / 統合メモリ128GB）。NVIDIA Sync の SSH 設定経由で接続する
