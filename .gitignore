@@ -1,0 +1,42 @@
+# 実レシート・検索スニペット等の非公開データ
+ml/data/private/
+
+# 認証情報
+.env
+.env.*
+!.env.example
+
+# 学習済み重み・チェックポイント（Hub またはボリュームで管理）
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.ckpt
+models/
+checkpoints/
+wandb/
+mlruns/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Elixir / Phoenix
+web/_build/
+web/deps/
+web/assets/node_modules/
+web/priv/static/assets/
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Claude Code の個人設定
+.claude/settings.local.json
