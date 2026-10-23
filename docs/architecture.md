@@ -2,11 +2,11 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1（ドラフト） |
+| 版 | v0.2（2026-10-23 方針決定を反映） |
 | 作成日 | 2026-10-23 |
 | 関連文書 | `docs/requirements.md` |
 
-> デプロイ方針（A/B/C）は1on1での確認結果で確定する。ここでは3方針すべてに対応できる構成として記述する。
+> デプロイは方針A（DGX Spark＋Cloudflare Tunnel）に確定。フロントはSolid.jsで、FastAPIから静的配信する。店ジャンルはOpenStreetMap（Nominatim）の店種別タグ＋対応表で判定する。
 
 ---
 
@@ -18,12 +18,12 @@ flowchart LR
         U["ユーザー<br/>スマホのブラウザ"]
     end
 
-    subgraph Web["Webコンテナ: Phoenix LiveView"]
-        UI["画面<br/>アップロード / 結果表示 / 候補選択"]
-        WCtl["推論サービス呼び出し<br/>タイムアウト・リトライ"]
+    subgraph Front["画面: Solid.js（ブラウザで実行）"]
+        UI["アップロード / 結果表示 / 候補選択"]
     end
 
-    subgraph Inf["推論コンテナ: FastAPI + transformers"]
+    subgraph Inf["アプリコンテナ: FastAPI + transformers"]
+        STATIC["静的配信<br/>Solid.jsのビルド成果物"]
         API["API層<br/>サイズ検証 / レート制限"]
         P1["段1 領域抽出<br/>OpenCV"]
         P2["段2 OCR<br/>既存モデルを推論利用"]
@@ -32,49 +32,46 @@ flowchart LR
         CHK["整合性チェック<br/>品目合計 = 合計金額"]
         NORM["店名正規化"]
         SRCH["検索クライアント<br/>店名のみ送信"]
-        P5["段5 店ジャンル分類<br/>ModernBERT系"]
+        P5["段5 店ジャンル判定<br/>店種別タグ→対応表"]
         MAP["判定粒度の決定<br/>genre_map.yaml"]
-        P6["段6 品目ジャンル分類<br/>ModernBERT系"]
+        P6["段6 品目ジャンル分類<br/>既存モデル（余裕があればFT）"]
         CACHE[("店名→店ジャンル<br/>キャッシュ")]
     end
 
     subgraph Ext["外部サービス（補助）"]
-        SE["検索API"]
+        SE["OpenStreetMap<br/>Nominatim"]
     end
 
     subgraph Store["モデル重み"]
         W[("ボリューム<br/>または Hugging Face Hub")]
     end
 
+    STATIC -.->|"画面を配信"| UI
     U -->|"画像アップロード"| UI
-    UI --> WCtl
-    WCtl -->|"HTTP"| API
+    UI -->|"POST /api/analyze"| API
     API --> P1 --> P2 --> P3
     P3 -->|"品目行"| P4 --> CHK
     P3 -->|"店名行"| NORM --> CACHE
     CACHE -->|"ヒット"| MAP
     CACHE -->|"ミス"| SRCH
     SRCH -->|"店名のみ"| SE
-    SE -->|"概要テキスト"| P5
+    SE -->|"店種別タグ"| P5
     P5 --> CACHE
     P5 --> MAP
     MAP -->|"品目ごと"| P6
     MAP -->|"全体で1ジャンル"| RES["結果の組み立て"]
     P6 --> RES
     CHK --> RES
-    RES -->|"JSON"| WCtl
-    WCtl --> UI
+    RES -->|"JSON"| UI
     UI -->|"表示"| U
 
     W -.->|"起動時にロード"| P2
-    W -.-> P3
-    W -.-> P5
     W -.-> P6
 ```
 
 **ポイント**
 
-- 外部サービスは検索APIのみ。判定の本体（段2〜6）はすべて推論コンテナ内の自前コードで動く
+- 外部サービスはOpenStreetMapの店舗検索のみ。OCRと品目ジャンル分類はすべてアプリコンテナ内の自前コードで動く
 - 検索に送るのは店名だけで、画像やレシートの他の情報は外部に出ない
 - キャッシュにより、同じ店は再検索しない。検索失敗時はキャッシュ、なければ「判定不能」で縮退する
 
@@ -86,13 +83,13 @@ flowchart LR
 sequenceDiagram
     autonumber
     actor User as ユーザー
-    participant Web as Phoenix
-    participant Inf as 推論サービス
+    participant Web as 画面（Solid.js）
+    participant Inf as FastAPI
     participant Cache as キャッシュ
-    participant Search as 検索API
+    participant Search as Nominatim
 
     User->>Web: レシート画像をアップロード
-    Web->>Inf: POST /analyze（画像）
+    Web->>Inf: POST /api/analyze（画像）
     Inf->>Inf: 領域抽出・補正（失敗時は原画像）
     Inf->>Inf: OCR（行テキスト＋座標）
     Inf->>Inf: 行の役割分類
@@ -105,10 +102,10 @@ sequenceDiagram
     else キャッシュにミス
         Inf->>Search: 店名で検索
         alt 検索成功
-            Search-->>Inf: 店の概要テキスト
-            Inf->>Inf: 店ジャンル分類（信頼度つき）
+            Search-->>Inf: 店種別タグ（shop=convenience 等）
+            Inf->>Inf: 対応表で店ジャンルに変換
             Inf->>Cache: 店名→店ジャンルを保存
-        else 検索失敗・タイムアウト
+        else 検索失敗・タイムアウト・該当なし
             Inf->>Inf: 店ジャンル＝判定不能
         end
     end
@@ -124,56 +121,26 @@ sequenceDiagram
 
 ---
 
-## 3. デプロイ構成
-
-### 3.1 方針A: 自宅公開型（DGX Spark）
+## 3. デプロイ構成（方針A: DGX Spark＋Cloudflare Tunnel）
 
 ```mermaid
 flowchart TB
-    User["ユーザー"] -->|"HTTPS"| CF["Cloudflare<br/>Tunnel / Access"]
+    User["ユーザー"] -->|"HTTPS"| CF["Cloudflare<br/>Tunnel"]
 
-    subgraph Home["自宅: DGX Spark（docker compose, profile=gpu）"]
+    subgraph Home["自宅: DGX Spark（docker compose）"]
         direction TB
-        Web["web<br/>Phoenix"]
-        Inf["inference<br/>FastAPI + transformers<br/>GPU・大きめのモデル"]
+        Tun["cloudflared"]
+        App["app<br/>FastAPI + transformers<br/>Solid.jsを静的配信"]
         Vol[("models ボリューム")]
     end
 
-    CF --> Web
-    Web --> Inf
-    Vol -.-> Inf
-    Inf -->|"店名のみ"| Search["検索API"]
+    CF --> Tun --> App
+    Vol -.-> App
+    App -->|"店名のみ"| Search["OpenStreetMap<br/>Nominatim"]
 ```
 
-### 3.2 方針B: クラウド完結型（軽量CPU構成）
-
-```mermaid
-flowchart TB
-    User["ユーザー"] -->|"HTTPS"| Host["クラウドのホスティング"]
-
-    subgraph Cloud["クラウド（docker compose, profile=cpu）"]
-        direction TB
-        Web["web<br/>Phoenix"]
-        Inf["inference<br/>FastAPI + transformers<br/>CPU・蒸留した小モデル"]
-        Vol[("models ボリューム<br/>または Hub から取得")]
-    end
-
-    Host --> Web
-    Web --> Inf
-    Vol -.-> Inf
-    Inf -->|"店名のみ"| Search["検索API"]
-```
-
-### 3.3 方針C: 二段構え
-
-```mermaid
-flowchart LR
-    User["ユーザー"] --> Entry["公開エントリ"]
-    Entry -->|"通常"| Spark["自宅 DGX Spark<br/>profile=gpu"]
-    Entry -.->|"ヘルスチェック失敗時<br/>自動切替"| CloudSmall["クラウド<br/>profile=cpu"]
-```
-
-> 切り替えの実現手段（DNSフェイルオーバー、ロードバランサ、フロント側のフォールバック等）は未決。1on1の回答後に決める。
+- 各サービスに `restart: unless-stopped` を付け、DGX Sparkの再起動後に自動で復帰させる
+- クラウドでのCPU構成（旧方針B・C）は採用しない
 
 ---
 
@@ -193,15 +160,11 @@ flowchart TB
     end
 
     subgraph Aux["補強データ"]
-        SHOP["有名チェーン・各業態の店名リスト"]
-        SNIP["検索スニペット収集<br/>規約確認の上、非公開で保持"]
         SYN["合成レシート画像<br/>領域抽出の評価用"]
     end
 
     subgraph Train["学習・評価（ml/）"]
-        T3["行の役割分類"]
-        T5["店ジャンル分類"]
-        T6["品目ジャンル分類"]
+        T6["品目ジャンル分類<br/>（余裕があればFT）"]
         EVAL["交差検証（店舗単位で分割）<br/>指標を docs/evaluation.md に記録"]
     end
 
@@ -211,12 +174,7 @@ flowchart TB
     end
 
     IMG --> OCRJ --> PRE --> FIX --> ANON
-    SHOP --> SNIP --> PRE
-    ANON --> T3
     ANON --> T6
-    FIX --> T5
-    T3 --> EVAL
-    T5 --> EVAL
     T6 --> EVAL
     SYN --> EVAL
     EVAL --> MODEL
@@ -225,7 +183,7 @@ flowchart TB
 
 **ポイント**
 
-- 実レシート画像とスニペット本文は、リポジトリに含めない（非公開領域で保持）
+- 実レシート画像は、リポジトリに含めない（非公開領域で保持）
 - 公開するのは、コード、匿名化済みのラベル付きテキスト、学習済みモデル、ラベル仕様書
 - 大モデルでの事前ラベル付けは「実験・データ作成」用途。デプロイ物の推論には使わない
 
@@ -234,14 +192,14 @@ flowchart TB
 ## 5. ディレクトリ構成（案）
 
 ```text
-receipt-app/
+receipt-tagger/
 ├── CLAUDE.md
 ├── README.md
-├── docker-compose.yml          # profiles: gpu / cpu
+├── docker-compose.yml          # app + cloudflared
 ├── .env.example
 ├── .gitignore
 ├── config/
-│   ├── genre_map.yaml          # 店ジャンル→判定粒度の対応表
+│   ├── genre_map.yaml          # 店種別タグ→店ジャンル、店ジャンル→判定粒度の対応表
 │   ├── labels.yaml             # 店ジャンル・品目ジャンル・行ラベルの定義
 │   └── thresholds.yaml         # 信頼度の閾値
 ├── docs/
@@ -255,21 +213,19 @@ receipt-app/
 │   ├── scripts/                # 学習・評価・データ作成スクリプト
 │   ├── configs/                # 学習設定（シード・ハイパーパラメータ）
 │   └── data/
-│       ├── private/            # 実レシート・スニペット（gitignore）
+│       ├── private/            # 実レシートとその派生データ（gitignore）
 │       └── public/             # 匿名化済み・合成データ
 ├── inference/
-│   ├── Dockerfile.gpu
-│   ├── Dockerfile.cpu
+│   ├── Dockerfile              # Solid.jsのビルドも含むマルチステージ
 │   ├── pyproject.toml
 │   ├── src/receipt_app/
-│   │   ├── main.py             # FastAPI
+│   │   ├── main.py             # FastAPI（APIと静的配信）
 │   │   ├── pipeline.py         # 段の組み立て
 │   │   ├── stages/             # 段1〜6を個別モジュールで実装
-│   │   ├── search.py           # 検索クライアント（店名のみ）
+│   │   ├── search.py           # Nominatimクライアント（店名のみ）
 │   │   └── cache.py
 │   └── tests/
-├── web/                        # Phoenix LiveView
-│   ├── Dockerfile
+├── frontend/                   # Solid.js（Vite）
 │   └── ...
 └── samples/                    # 架空レシート画像（デモ用）
 ```
