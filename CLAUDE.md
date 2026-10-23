@@ -26,7 +26,9 @@
 
 ## 実行環境
 
-- **開発**: Windows（この機）。uv、Docker あり。Elixir は未インストールなので、Phoenix は Docker 経由で動かす
+- **構成**: 推論APIは FastAPI（APIのみ）、フロントエンドは Solid.js
+- **デプロイ**: DGX Spark 上の docker compose を Cloudflare Tunnel で公開する（方針A）
+- **開発**: Windows（この機）。uv、Node、Docker あり
 - **学習・実験**: DGX Spark（aarch64 / Ubuntu 24.04 / NVIDIA GB10 / 統合メモリ128GB）。NVIDIA Sync の SSH 設定経由で接続する
   ```bash
   ssh -F "$LOCALAPPDATA/NVIDIA Corporation/Sync/config/ssh_config" K-EdgeXpert '<command>'
@@ -52,7 +54,7 @@ docker compose --profile cpu up --build   # gpu プロファイルは DGX Spark 
 - ジャンル定義・対応表・閾値はコードに直書きせず、`config/*.yaml` から読む
 - モデルのロードは起動時に1回だけ行う
 - 外部APIの失敗は「判定不能」として縮退させる。アプリ全体を落とさない
-- Web（Phoenix）は最小限にする（アップロード、結果表示、低信頼時の選択）
+- フロントエンドの機能は、アップロード、結果表示、低信頼時の選択の3つに絞る
 
 ## テスト
 
@@ -71,6 +73,6 @@ docker compose --profile cpu up --build   # gpu プロファイルは DGX Spark 
 
 ## 事前にユーザーへ確認すること
 
-- デプロイ先の選定、有料サービスの利用、検索APIの選定
+- 有料サービスの利用、検索APIの選定、Cloudflare の設定変更
 - ジャンル定義（`config/labels.yaml`）の大きな変更
 - 外部サービスの追加、データの削除、履歴の書き換え
