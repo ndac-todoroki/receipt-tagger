@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.*_cache
+.git
+.env
+ml/
+docs/
+samples/
