@@ -39,14 +39,24 @@
 
 ## 開発コマンド
 
-> 骨組みを作ったら、実際のコマンドに更新する。
-
 ```bash
-# 推論サービス
-cd inference && uv sync && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
-# 全体起動
-docker compose --profile cpu up --build   # gpu プロファイルは DGX Spark 上で
+# 推論API（inference/）: 変更後は必ず全部通す
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
+uv run uvicorn receipt_app.main:app --reload          # 開発サーバー（:8000）
+
+# 画面（frontend/）
+npm run dev      # :5173。/api は :8000 の uvicorn へ転送される
+npm run build    # 型チェックを含む
+
+# DGX Spark へのデプロイ（リポジトリのルートで。未コミットの変更も含めて送る）
+git add -A && git archive --format=tar --prefix=receipt-tagger/ $(git stash create) \
+  | ssh -F "$LOCALAPPDATA/NVIDIA Corporation/Sync/config/ssh_config" K-EdgeXpert \
+    'tar -x -C ~ && cd ~/receipt-tagger && docker compose up -d --build'
+# 確認: DGX Spark 上で curl localhost:8080/api/health（8000 は NIM が使用中）
+# 公開: .env に TUNNEL_TOKEN を置いて docker compose --profile tunnel up -d
 ```
+
+- この Windows 機では Docker Desktop が常時起動していないので、コンテナの確認は DGX Spark で行う
 
 ## コーディング規約
 
