@@ -1,0 +1,2 @@
+# 信頼度の閾値【暫定】。検証データで決め直す（docs/requirements.md §9）
+item_genre_min_confidence: 0.5

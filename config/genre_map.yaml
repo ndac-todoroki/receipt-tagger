@@ -1,0 +1,47 @@
+# OpenStreetMap の店種別タグ（Nominatim の category=type）→ 店ジャンル
+# ここに無いタグは「その他」として扱う
+osm_tag_to_store_genre:
+  amenity=restaurant: 飲食店
+  amenity=fast_food: 飲食店
+  amenity=cafe: 飲食店
+  amenity=bar: 飲食店
+  amenity=pub: 飲食店
+  amenity=food_court: 飲食店
+  amenity=taxi: 交通
+  amenity=bus_station: 交通
+  railway=station: 交通
+  public_transport=station: 交通
+  shop=supermarket: スーパー
+  shop=convenience: コンビニ
+  shop=chemist: ドラッグストア
+  amenity=pharmacy: ドラッグストア
+  shop=doityourself: 雑貨・ホームセンター
+  shop=hardware: 雑貨・ホームセンター
+  shop=variety_store: 雑貨・ホームセンター
+  shop=houseware: 雑貨・ホームセンター
+  shop=stationery: 雑貨・ホームセンター
+  shop=gift: 雑貨・ホームセンター
+  amenity=hospital: 医療
+  amenity=clinic: 医療
+  amenity=doctors: 医療
+  amenity=dentist: 医療
+  shop=mobile_phone: 公共料金・通信
+  shop=clothes: 衣類・家電
+  shop=shoes: 衣類・家電
+  shop=electronics: 衣類・家電
+  shop=computer: 衣類・家電
+
+# 店ジャンル → 判定粒度（docs/requirements.md §8.3）
+#   whole: レシート全体で1ジャンル / per_item: 品目ごとに判定
+# 店ジャンルが判定不能のときは per_item とする
+store_genre_to_granularity:
+  飲食店: whole
+  交通: whole
+  医療: whole
+  公共料金・通信: whole
+  スーパー: per_item
+  コンビニ: per_item
+  ドラッグストア: per_item
+  雑貨・ホームセンター: per_item
+  衣類・家電: per_item
+  その他: per_item
