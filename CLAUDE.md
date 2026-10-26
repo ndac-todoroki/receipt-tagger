@@ -30,6 +30,7 @@
 - **モデル**: 多段パイプラインは設計どおり。まずは既存モデルを推論に使うだけで端から端まで通し、ファインチューニングは余裕があれば行う（最初の対象は品目ジャンル分類）
 - **デプロイ**: DGX Spark 上の docker compose を Cloudflare Tunnel で公開する（方針A）
 - **開発**: Windows（この機）。uv、Node、Docker あり
+- **GitHub**: `ndac-todoroki/receipt-tagger`（private。提出時に公開へ切り替える）。`gh` は**常に `ndac-todoroki` で操作する**。この機には `SpiderAircrafts` でもログインしているため、`gh` を使う前に `gh api user --jq .login` で確かめ、違えば `gh auth switch -u ndac-todoroki` する
 - **学習・実験**: DGX Spark（aarch64 / Ubuntu 24.04 / NVIDIA GB10 / 統合メモリ128GB）。NVIDIA Sync の SSH 設定経由で接続する
   ```bash
   ssh -F "$LOCALAPPDATA/NVIDIA Corporation/Sync/config/ssh_config" K-EdgeXpert '<command>'
