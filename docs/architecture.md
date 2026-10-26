@@ -222,8 +222,8 @@ receipt-tagger/
 │   │   ├── main.py             # FastAPI（APIと静的配信）
 │   │   ├── pipeline.py         # 段の組み立て
 │   │   ├── stages/             # 段1〜6を個別モジュールで実装
-│   │   ├── search.py           # Nominatimクライアント（店名のみ）
-│   │   └── cache.py
+│   │   ├── config.py           # config/*.yaml の読み込み
+│   │   └── search.py           # Nominatimクライアント（店名のみ）とキャッシュ
 │   └── tests/
 ├── frontend/                   # Solid.js（Vite）
 │   └── ...
