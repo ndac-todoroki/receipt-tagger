@@ -48,11 +48,11 @@ uv run uvicorn receipt_app.main:app --reload          # 開発サーバー（:80
 npm run dev      # :5173。/api は :8000 の uvicorn へ転送される
 npm run build    # 型チェックを含む
 
-# DGX Spark へのデプロイ（リポジトリのルートで。未コミットの変更も含めて送る）
-git add -A && git archive --format=tar --prefix=receipt-tagger/ $(git stash create) \
-  | ssh -F "$LOCALAPPDATA/NVIDIA Corporation/Sync/config/ssh_config" K-EdgeXpert \
-    'tar -x -C ~ && cd ~/receipt-tagger && docker compose up -d --build'
-# 確認: DGX Spark 上で curl localhost:8080/api/health（8000 は NIM が使用中）
+# DGX Spark へのデプロイ: コミット済みの main を push する
+git push spark main
+# → Spark の ~/repos/receipt-tagger.git の post-receive hook が ~/receipt-tagger に展開し、
+#   docker compose up -d --build とヘルスチェック（localhost:8080。8000 は NIM が使用中）まで行う
+#   remote spark への ssh は git config core.sshCommand で NVIDIA Sync の設定を使う
 # 公開: .env に TUNNEL_TOKEN を置いて docker compose --profile tunnel up -d
 ```
 
