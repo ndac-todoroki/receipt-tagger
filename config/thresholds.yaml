@@ -1,2 +1,6 @@
 # 信頼度の閾値【暫定】。検証データで決め直す（docs/requirements.md §9）
+
+# 店ジャンル: OSMで同名の店を検索した結果のうち、最多の店ジャンルが占める割合
+store_genre_min_confidence: 0.5
+# 品目ジャンル: 分類モデルの出力確率
 item_genre_min_confidence: 0.5

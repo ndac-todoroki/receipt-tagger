@@ -26,6 +26,7 @@ class GenreMap(BaseModel):
 class Thresholds(BaseModel):
     """信頼度の閾値（thresholds.yaml）。"""
 
+    store_genre_min_confidence: float
     item_genre_min_confidence: float
 
 
