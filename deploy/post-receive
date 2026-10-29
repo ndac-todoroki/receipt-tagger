@@ -1,0 +1,24 @@
+#!/bin/bash
+# DGX Spark の bare リポジトリ（~/repos/receipt-tagger.git/hooks/post-receive）に置くデプロイ用 hook。
+# main への push で ~/receipt-tagger に展開し、コンテナを作り直してヘルスチェックする。
+# 更新したら: scp -F "<NVIDIA Sync の ssh_config>" deploy/post-receive K-EdgeXpert:repos/receipt-tagger.git/hooks/
+set -e
+DEPLOY_DIR="$HOME/receipt-tagger"
+while read -r _old new ref; do
+  [ "$ref" = "refs/heads/main" ] || continue
+  mkdir -p "$DEPLOY_DIR"
+  git --work-tree="$DEPLOY_DIR" checkout -f main
+  cd "$DEPLOY_DIR"
+  echo "deploy: ${new:0:7} をビルドして起動します"
+  docker compose up -d --build 2>&1 | tail -5
+  # 起動時にモデルを読み込む（初回はダウンロードも）ので、応答するまで最大5分待つ
+  for _ in $(seq 1 60); do
+    if curl -sf "http://localhost:${APP_PORT:-8080}/api/health" > /dev/null; then
+      echo "health ok"
+      exit 0
+    fi
+    sleep 5
+  done
+  echo "health check failed: docker compose logs app を確認してください" >&2
+  exit 1
+done
