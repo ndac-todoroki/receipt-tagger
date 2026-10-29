@@ -31,13 +31,16 @@ def main() -> None:
     parser.add_argument("--det-lang", default="JAPAN")
     args = parser.parse_args()
 
+    # v6 の検出モデルは LangDet に無い言語（JAPAN）も受け付けるので LangRec で渡す
+    det_lang = (
+        LangDet[args.det_lang] if args.det_lang in LangDet.__members__ else LangRec[args.det_lang]
+    )
     engine = RapidOCR(
         params={
             "Rec.lang_type": LangRec[args.lang],
             "Rec.ocr_version": OCRVersion[args.version],
             "Rec.model_type": ModelType[args.model_type.upper()],
-            # v6 の検出モデルは LangDet に無い言語（JAPAN）も受け付けるので LangRec で渡す
-            "Det.lang_type": LangDet[args.det_lang] if args.det_lang in LangDet.__members__ else LangRec[args.det_lang],
+            "Det.lang_type": det_lang,
             "Det.ocr_version": OCRVersion[args.version],
             "Det.model_type": ModelType[args.model_type.upper()],
         }
