@@ -10,6 +10,19 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from receipt_app.main import create_app
+from receipt_app.schemas import AnalyzeResult, ConsistencyResult, StoreResult
+
+FAKE_RESULT = AnalyzeResult(
+    store=StoreResult(name="サンプルマート", genre="コンビニ", status="confirmed"),
+    granularity="per_item",
+    items=[],
+    total=None,
+    consistency=ConsistencyResult(ok=None, items_sum=0, total=None),
+)
+
+
+def _fake_analyzer(image: Image.Image) -> AnalyzeResult:
+    return FAKE_RESULT
 
 
 def _png_bytes() -> bytes:
@@ -19,7 +32,7 @@ def _png_bytes() -> bytes:
 
 
 def _client(max_upload_bytes: int = 10_000_000) -> TestClient:
-    return TestClient(create_app(max_upload_bytes=max_upload_bytes))
+    return TestClient(create_app(analyzer=_fake_analyzer, max_upload_bytes=max_upload_bytes))
 
 
 def test_ヘルスチェックはokを返す() -> None:

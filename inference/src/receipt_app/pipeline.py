@@ -1,46 +1,139 @@
-"""各段を組み立ててレシート1枚を解析する。"""
+"""各段を組み立てて、レシート1枚を解析する。
+
+OCR → 行の組み立て → 店名候補・品目・合計の抽出 → 店の検索と店ジャンル判定
+→ 判定粒度の決定 → 品目ジャンル分類 → 整合性チェック
+"""
+
+from pathlib import Path
+from typing import Protocol
 
 from PIL import Image
 
-from receipt_app.schemas import (
-    AnalyzeResult,
-    ConsistencyResult,
-    ItemResult,
-    StoreResult,
+from receipt_app.config import AppConfig
+from receipt_app.schemas import AnalyzeResult, ItemResult, StoreResult
+from receipt_app.search import NominatimClient
+from receipt_app.stages.consistency import check_consistency
+from receipt_app.stages.item_genre import EmbeddingItemGenreClassifier, ItemGenreJudgement
+from receipt_app.stages.lines import OcrBox, group_rows
+from receipt_app.stages.receipt_parser import ParsedItem, parse_receipt
+from receipt_app.stages.store_genre import (
+    StoreGenreJudgement,
+    decide_granularity,
+    judge_store_genre,
 )
 
+# 店名の候補を検索する上限。Nominatim は1秒1回までなので、待ち時間を抑えるため絞る
+MAX_STORE_QUERIES = 3
 
-def analyze(image: Image.Image) -> AnalyzeResult:
-    """レシート画像を解析して結果を返す。
 
-    骨組みの段階なので固定のダミー結果を返す。段を実装したら順に置き換える。
-    """
-    items = [
-        ItemResult(
-            name="おにぎり 鮭",
-            quantity=1,
-            unit_price=150,
-            amount=150,
-            genre="その他食品",
-            confidence=0.92,
-            status="confirmed",
-        ),
-        ItemResult(
-            name="緑茶 500ml",
-            quantity=1,
-            unit_price=130,
-            amount=130,
-            genre=None,
-            confidence=0.41,
-            status="uncertain",
-            candidates=["飲料", "その他食品"],
-        ),
-    ]
-    items_sum = sum(item.amount for item in items)
-    return AnalyzeResult(
-        store=StoreResult(name="ダミーマート", genre="コンビニ", status="confirmed"),
-        granularity="per_item",
-        items=items,
-        total=items_sum,
-        consistency=ConsistencyResult(ok=True, items_sum=items_sum, total=items_sum),
-    )
+class OcrReader(Protocol):
+    def read(self, image: Image.Image) -> list[OcrBox]: ...
+
+
+class StoreSearch(Protocol):
+    def search_tags(self, store_name: str) -> list[str] | None: ...
+
+
+class ItemClassifier(Protocol):
+    def classify(self, names: list[str]) -> list[ItemGenreJudgement]: ...
+
+
+class Pipeline:
+    """レシート画像の解析パイプライン。各段は差し替えられる。"""
+
+    def __init__(
+        self,
+        config: AppConfig,
+        ocr: OcrReader,
+        search: StoreSearch,
+        item_classifier: ItemClassifier,
+    ) -> None:
+        self._config = config
+        self._ocr = ocr
+        self._search = search
+        self._item_classifier = item_classifier
+
+    @classmethod
+    def load(cls, config: AppConfig, model_dir: Path | None = None) -> "Pipeline":
+        """本物のモデルを読み込んだパイプラインを作る。起動時に1回だけ呼ぶ。"""
+        return cls(
+            config=config,
+            ocr=_load_ocr(model_dir),
+            search=NominatimClient(),
+            item_classifier=EmbeddingItemGenreClassifier.load(config),
+        )
+
+    def analyze(self, image: Image.Image) -> AnalyzeResult:
+        """レシート画像を解析して結果を返す。"""
+        rows = [row.text for row in group_rows(self._ocr.read(image))]
+        receipt = parse_receipt(rows)
+
+        store_name, store = self._judge_store(receipt.store_candidates)
+        granularity = decide_granularity(
+            store.genre if store.status != "unknown" else None, self._config.genre_map
+        )
+        items = self._judge_items(receipt.items, per_item=granularity == "per_item")
+        consistency = check_consistency(
+            [i.amount for i in receipt.items],
+            total=receipt.total,
+            subtotal=receipt.subtotal,
+            tax=receipt.tax,
+        )
+        return AnalyzeResult(
+            store=StoreResult(
+                name=store_name,
+                genre=store.genre,
+                status=store.status,
+                candidates=store.candidates or self._config.labels.store_genres,
+            ),
+            granularity=granularity,
+            items=items,
+            total=receipt.total,
+            consistency=consistency,
+        )
+
+    def _judge_store(self, candidates: list[str]) -> tuple[str | None, StoreGenreJudgement]:
+        # ロゴのOCRや事業者名など、候補のどれが店として見つかるかは試すまで分からない
+        for name in candidates[:MAX_STORE_QUERIES]:
+            tags = self._search.search_tags(name)
+            if tags:
+                return name, judge_store_genre(
+                    tags,
+                    self._config.genre_map,
+                    min_confidence=self._config.thresholds.store_genre_min_confidence,
+                )
+        unknown = StoreGenreJudgement(genre=None, confidence=None, status="unknown")
+        return (candidates[0] if candidates else None), unknown
+
+    def _judge_items(self, items: list[ParsedItem], per_item: bool) -> list[ItemResult]:
+        # 値引きは品物ではないので分類しない
+        targets = [i for i in items if per_item and i.amount > 0]
+        judged = dict(
+            zip(
+                map(id, targets),
+                self._item_classifier.classify([i.name for i in targets]),
+                strict=True,
+            )
+        )
+        results = []
+        for item in items:
+            j = judged.get(id(item))
+            results.append(
+                ItemResult(
+                    name=item.name,
+                    quantity=item.quantity,
+                    unit_price=item.unit_price,
+                    amount=item.amount,
+                    genre=j.genre if j else None,
+                    confidence=j.confidence if j else None,
+                    status=j.status if j else "confirmed",
+                    candidates=j.candidates if j else [],
+                )
+            )
+        return results
+
+
+def _load_ocr(model_dir: Path | None) -> OcrReader:
+    from receipt_app.stages.ocr import RapidOcrReader
+
+    return RapidOcrReader(model_dir=None if model_dir is None else model_dir / "rapidocr")
