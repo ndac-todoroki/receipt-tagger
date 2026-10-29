@@ -71,8 +71,20 @@ _MAX_HEADER_ROWS = 6
 _MAX_STORE_NAME_LENGTH = 20
 
 
+# 半角カナの濁点・半濁点は、OCRで引用符や度の記号に読まれることがある（例: ト” → ド、ハ° → パ）
+_SOUND_MARKS = re.compile(r"(?P<kana>[\u30a1-\u30fa])(?P<mark>[”“\"゛]|[°゜])")
+
+
+def _restore_sound_mark(m: re.Match[str]) -> str:
+    combining = "\u3099" if m["mark"] in '”“"゛' else "\u309a"
+    composed = unicodedata.normalize("NFC", m["kana"] + combining)
+    # 濁点の付かない仮名（例: ア）なら、組み合わせられないので元のまま残す
+    return composed if len(composed) == 1 else m.group(0)
+
+
 def _normalize(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).strip()
+    text = unicodedata.normalize("NFKC", text).strip()
+    return _SOUND_MARKS.sub(_restore_sound_mark, text)
 
 
 def _compact(text: str) -> str:

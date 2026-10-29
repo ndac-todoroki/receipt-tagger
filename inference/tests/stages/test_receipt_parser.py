@@ -220,3 +220,17 @@ def test_合計の行が無ければ支払金額を合計にする() -> None:
     receipt = parse_receipt([DATE, "パン ¥200", "支払金額 ¥200"])
 
     assert receipt.total == 200
+
+
+@pytest.mark.parametrize(
+    ("row", "name"),
+    [
+        ("カップメン ト”ンヘ“エ ¥200", "カップメン ドンベエ"),
+        ("ハ°スタ ¥200", "パスタ"),
+        ("アイス 5°C ¥200", "アイス 5°C"),
+    ],
+)
+def test_半角カナの濁点と半濁点が記号に読まれたものを直す(row: str, name: str) -> None:
+    receipt = parse_receipt([DATE, row, "合計 ¥200"])
+
+    assert receipt.items[0].name == name
