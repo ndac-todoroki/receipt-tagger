@@ -13,7 +13,14 @@ function GenreCell(props: {
   return (
     <Show
       when={props.status === 'uncertain'}
-      fallback={<>{props.genre ?? <span class="muted">判定不能</span>}</>}
+      fallback={
+        props.status === 'unknown' ? (
+          <span class="muted">判定不能</span>
+        ) : (
+          // 値引きの行など、分類の対象外はジャンルを出さない
+          <>{props.genre ?? <span class="muted">—</span>}</>
+        )
+      }
     >
       <select onChange={(e) => props.onChoose(e.currentTarget.value)}>
         <option value="">未確定（選択）</option>
@@ -56,6 +63,9 @@ export default function App() {
         <button disabled={!file() || loading()} onClick={submit}>
           {loading() ? '解析中…' : '解析する'}
         </button>
+        <Show when={loading()}>
+          <p class="muted">文字の読み取りに10秒ほどかかります</p>
+        </Show>
       </div>
 
       <Show when={error()}>
@@ -129,6 +139,12 @@ export default function App() {
           </>
         )}
       </Show>
+      <footer class="muted">
+        店舗情報: ©{' '}
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+          OpenStreetMap contributors
+        </a>
+      </footer>
     </main>
   )
 }

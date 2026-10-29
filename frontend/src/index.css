@@ -97,3 +97,12 @@ button:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+footer {
+  margin-top: 24px;
+  font-size: 0.85rem;
+}
+
+a {
+  color: var(--accent);
+}
