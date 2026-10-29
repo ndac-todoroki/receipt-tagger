@@ -28,6 +28,7 @@ class Thresholds(BaseModel):
 
     store_genre_min_confidence: float
     item_genre_min_confidence: float
+    item_genre_temperature: float
 
 
 class AppConfig(BaseModel):
@@ -36,6 +37,7 @@ class AppConfig(BaseModel):
     labels: Labels
     genre_map: GenreMap
     thresholds: Thresholds
+    item_genre_examples: dict[str, list[str]]
 
 
 def _read_yaml(path: Path) -> object:
@@ -49,4 +51,5 @@ def load_config(config_dir: Path) -> AppConfig:
         labels=Labels.model_validate(_read_yaml(config_dir / "labels.yaml")),
         genre_map=GenreMap.model_validate(_read_yaml(config_dir / "genre_map.yaml")),
         thresholds=Thresholds.model_validate(_read_yaml(config_dir / "thresholds.yaml")),
+        item_genre_examples=_read_yaml(config_dir / "item_genre_examples.yaml"),  # type: ignore[arg-type]
     )

@@ -8,10 +8,14 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.161.1",
+    "onnxruntime>=1.31.1",
     "pillow>=13.0.0",
     "pydantic>=2.14.1",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",
+    "rapidocr>=3.10.0",
+    "sentence-transformers>=6.2.0",
+    "torch>=2.15.0",
     "uvicorn>=0.54.0",
 ]
 
@@ -40,3 +44,12 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# 推論はCPUで動かすので、CUDA入りの巨大なホイールを避けてCPU版のtorchを使う
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

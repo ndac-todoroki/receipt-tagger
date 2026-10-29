@@ -29,8 +29,13 @@ def test_すべての店ジャンルに判定粒度が決まっている(config:
     assert set(config.genre_map.store_genre_to_granularity) == set(config.labels.store_genres)
 
 
+def test_品目ジャンルの見本がすべての品目ジャンルにある(config: AppConfig) -> None:
+    assert list(config.item_genre_examples) == config.labels.item_genres
+    assert all(config.item_genre_examples.values())
+
+
 def test_粒度の値がwholeかper_item以外なら読み込みで弾く(tmp_path: Path) -> None:
-    for name in ("labels.yaml", "thresholds.yaml"):
+    for name in ("labels.yaml", "thresholds.yaml", "item_genre_examples.yaml"):
         (tmp_path / name).write_text((REPO_CONFIG_DIR / name).read_text("utf-8"), "utf-8")
     (tmp_path / "genre_map.yaml").write_text(
         "osm_tag_to_store_genre: {}\nstore_genre_to_granularity:\n  飲食店: all\n", "utf-8"

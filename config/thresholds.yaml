@@ -4,3 +4,5 @@
 store_genre_min_confidence: 0.5
 # 品目ジャンル: 分類モデルの出力確率
 item_genre_min_confidence: 0.5
+# 品目ジャンル: 類似度を確率にするときの温度。小さいほど最も近いジャンルの確率が高くなる
+item_genre_temperature: 0.05
