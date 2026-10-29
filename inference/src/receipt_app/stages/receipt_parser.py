@@ -35,7 +35,7 @@ class ParsedReceipt:
 # 末尾の金額。¥ が * に読まれる、カンマがピリオドに読まれる、税区分の印が付く、を許す
 _AMOUNT_TAIL = re.compile(
     r"(?P<sign>-)?\s*(?P<yen>[¥\\*])?\s*(?P<sign2>-)?"
-    r"(?P<num>\d{1,3}(?:[,.]\d{3})+|\d+)\s*(?:内|外|J|軽)?\s*$"
+    r"(?P<num>\d{1,3}(?:[,.]\d{3})+|\d+)\s*(?P<mark>内|外|J|軽|円|-)?\s*$"
 )
 _DATE = re.compile(r"\d{4}\s*[年/.\-]\s*\d{1,2}\s*[月/.\-]\s*\d{1,2}")
 _QTY_AT = re.compile(r"@\s*(?P<unit>[\d,.]+)\s*[×xX*]\s*(?P<qty>\d+)")
@@ -50,14 +50,22 @@ _NAME_PREFIXES = [
     re.compile(r"^\d{4,}\s*"),
     re.compile(r"^[>＞]+\s*"),
 ]
-_ITEM_EXCLUDE = re.compile(r"対象|点数|預|釣|番号|TEL|Tel|電話|ポイント|No|登録|レジ|担当|税|稅")
+_ADDRESS = r"(都|道|府|県).*(市|区|町|村)"
+_ITEM_EXCLUDE = re.compile(
+    r"対象|点数|預|釣|番号|TEL|Tel|電話|ポイント|No|登録|レジ|担当|税|稅|" + _ADDRESS
+)
 _SUBTOTAL = re.compile(r"小計|小计")
 _TOTAL = re.compile(r"合計|合计")
+# 合計の行が無いレシートで、合計の代わりになる行
+_TOTAL_FALLBACK = re.compile(r"支払金額|お支払|請求|領収金額")
+_HAS_WORD = re.compile(r"[^\W\d_]")
+# 品目のうち円記号などの印が付いた金額がこの割合以上なら、印の無い数字は金額とみなさない
+_MARKED_STYLE_RATIO = 0.5
 _TAX = re.compile(r"税|稅")
 _COMPANY = re.compile(r"株式会社|有限会社|\(株\)|\(有\)")
 _LABEL_PREFIX = re.compile(r"^[^：:]*[：:]\s*")
 _NOT_STORE_NAME = re.compile(
-    r"領収|領收|レシート|TEL|Tel|電話|〒|登録|番号|No|(都|道|府|県).*(市|区|町|村)|\d+-\d+"
+    r"領収|領收|レシート|TEL|Tel|電話|〒|登録|番号|No|" + _ADDRESS + r"|\d+-\d+"
 )
 _MAX_HEADER_ROWS = 6
 _MAX_STORE_NAME_LENGTH = 20
@@ -75,26 +83,44 @@ def _to_int(num: str) -> int:
     return int(re.sub(r"[,.]", "", num))
 
 
-def _split_amount(text: str) -> tuple[str, int] | None:
+@dataclass(frozen=True)
+class _Amount:
+    prefix: str
+    value: int
+    # 円記号・符号・税区分の印など、金額であることを示す印が付いていたか
+    marked: bool
+
+
+def _split_amount(text: str) -> _Amount | None:
     """行を「末尾の金額」と「その前の部分」に分ける。金額が無ければ None。"""
     m = _AMOUNT_TAIL.search(text)
     if m is None:
         return None
-    prefix = text[: m.start()]
-    before_num = text[: m.start("num")]
-    # 「客数：6」のように語に続く数字は金額ではない。¥ か符号か空白の後ろの数字だけを金額とみなす
-    if not (m["yen"] or m["sign"] or m["sign2"] or before_num == "" or before_num[-1].isspace()):
+    # 「3丁目26-6」のように語に続くハイフンは符号ではない
+    if m["sign"] and m.start("sign") > 0 and not text[m.start("sign") - 1].isspace():
         return None
-    sign = -1 if (m["sign"] or m["sign2"]) else 1
-    return prefix.strip(), sign * _to_int(m["num"])
+    num = m["num"]
+    # 「¥0」が「04」のように読まれることがあるので、0で始まる数字は金額とみなさない
+    if num.startswith("0") and len(num) > 1:
+        return None
+    before_num = text[: m.start("num")]
+    signed = bool(m["sign"] or m["sign2"])
+    # 「客数：6」のように語に続く数字は金額ではない。¥ か符号か空白の後ろの数字だけを金額とみなす
+    if not (m["yen"] or signed or before_num == "" or before_num[-1].isspace()):
+        return None
+    return _Amount(
+        prefix=text[: m.start()].strip(),
+        value=(-1 if signed else 1) * _to_int(num),
+        marked=bool(m["yen"] or signed or m["mark"]),
+    )
 
 
 def parse_amount(text: str) -> int | None:
     """金額の表記（例: "¥1,080", "874内", "-30"）を整数にする。金額でなければ None。"""
-    split = _split_amount(_normalize(text))
-    if split is None or split[0] != "":
+    amount = _split_amount(_normalize(text))
+    if amount is None or amount.prefix != "":
         return None
-    return split[1]
+    return amount.value
 
 
 def _clean_name(text: str) -> str:
@@ -127,29 +153,52 @@ def _is_quantity_row(text: str) -> bool:
     return bool(_QTY_AT.search(text) or _QTY_TAN.search(text))
 
 
+def _is_excluded(row: str) -> bool:
+    return not _is_quantity_row(row) and (row[0] in "(（" or bool(_ITEM_EXCLUDE.search(row)))
+
+
 def _parse_items(rows: list[str]) -> list[ParsedItem]:
+    amounts = [a for r in rows if not _is_excluded(r) and (a := _split_amount(r)) is not None]
+    marked_style = bool(amounts) and (
+        sum(a.marked for a in amounts) / len(amounts) >= _MARKED_STYLE_RATIO
+    )
+
     items: list[ParsedItem] = []
     pending_name: str | None = None
-    for row in rows:
-        if _JAN.search(row):
-            continue
-        quantity_row = _is_quantity_row(row)
-        if not quantity_row and (row[0] in "(（" or _ITEM_EXCLUDE.search(row)):
-            pending_name = None
-            continue
-        split = _split_amount(row)
-        if split is None:
-            # 金額の無い行は、次の行に金額が来る品名とみなす
-            pending_name = None if quantity_row else _clean_name(row) or None
-            continue
-        rest, amount = split
-        name = pending_name if quantity_row else (_clean_name(rest) or pending_name)
-        pending_name = None
-        if amount == 0 or not name:
-            continue
+
+    def add(name: str, amount: int, rest: str) -> None:
+        if amount == 0 or not _HAS_WORD.search(name):
+            return
         qty = _parse_quantity(rest, amount)
         quantity, unit_price = qty if qty else (1, None)
         items.append(ParsedItem(name=name, amount=amount, quantity=quantity, unit_price=unit_price))
+
+    for row in rows:
+        split = _split_amount(row)
+        if marked_style and split is not None and not split.marked:
+            # 金額の多くに印があるレシートで、印の無い数字はレジ番号などとみなす
+            split = None
+        if _JAN.search(row):
+            # 印字の位置がずれて、前の品目の金額が次の品目のJANの行に読まれることがある
+            if split is not None and pending_name:
+                add(pending_name, split.value, "")
+            pending_name = None
+            continue
+        quantity_row = _is_quantity_row(row)
+        if _is_excluded(row):
+            pending_name = None
+            continue
+        if split is None:
+            if row.startswith("@"):
+                # 単価と数量の行が読み切れなかったもの。品名は次の金額の行まで持ち越す
+                continue
+            # 金額の無い行は、次の行に金額が来る品名とみなす
+            pending_name = None if quantity_row else _clean_name(row) or None
+            continue
+        name = pending_name if quantity_row else (_clean_name(split.prefix) or pending_name)
+        pending_name = None
+        if name:
+            add(name, split.value, split.prefix)
     return items
 
 
@@ -179,7 +228,10 @@ def parse_receipt(raw_rows: list[str]) -> ParsedReceipt:
         (
             i
             for i in range(items_start, len(rows))
-            if _SUBTOTAL.search(_compact(rows[i])) or _TOTAL.search(_compact(rows[i]))
+            if re.search(
+                "|".join(p.pattern for p in (_SUBTOTAL, _TOTAL, _TOTAL_FALLBACK)),
+                _compact(rows[i]),
+            )
         ),
         len(rows),
     )
@@ -189,24 +241,33 @@ def parse_receipt(raw_rows: list[str]) -> ParsedReceipt:
     total_index = len(rows)
     for i in range(items_end, len(rows)):
         compact = _compact(rows[i])
-        split = _split_amount(rows[i])
-        if split is None or rows[i][0] in "(（":
+        amount = _split_amount(rows[i])
+        if amount is None or rows[i][0] in "(（":
             continue
         if subtotal is None and _SUBTOTAL.search(compact):
-            subtotal = split[1]
+            subtotal = amount.value
         elif _TOTAL.search(compact) and not _SUBTOTAL.search(compact):
-            total, total_index = split[1], i
+            total, total_index = amount.value, i
             break
+    if total is None:
+        for i in range(items_end, len(rows)):
+            amount = _split_amount(rows[i])
+            if amount is not None and _TOTAL_FALLBACK.search(_compact(rows[i])):
+                total, total_index = amount.value, i
+                break
 
     # 合計より前にある税の行だけを外税とみなす（合計の後の「内消費税」は合計に含まれている）
-    tax_amounts = [
-        split[1]
+    tax_rows = [
+        (r, amount.value)
         for r in rows[items_end:total_index]
         if _TAX.search(r)
         and not re.search(r"対象|内|小計|小计", r)
         and r[0] not in "(（"
-        and (split := _split_amount(r)) is not None
+        and (amount := _split_amount(r)) is not None
     ]
+    # 「外税額計」のような税額の合計行があれば、税率ごとの内訳と二重に数えない
+    summary = [value for r, value in tax_rows if "計" in r]
+    tax_amounts = summary or [value for _, value in tax_rows]
 
     return ParsedReceipt(
         store_candidates=_store_candidates(rows, len(rows) if date_index is None else date_index),

@@ -148,3 +148,75 @@ def test_住所や電話番号や領収証の行は店名の候補にしない()
     )
 
     assert receipt.store_candidates == ["サンプルマート"]
+
+
+@pytest.mark.parametrize(("text", "expected"), [("730円", 730), ("¥1,000-", 1000)])
+def test_円や末尾のハイフンが付いた金額も読む(text: str, expected: int) -> None:
+    assert parse_amount(text) == expected
+
+
+def test_先頭が0の数字は金額とみなさない() -> None:
+    # 「¥0」が「04」のように読まれることがある
+    assert parse_amount("04") is None
+
+
+def test_語に続くハイフンは負の符号とみなさない() -> None:
+    assert parse_amount("3丁目26-6") is None
+
+
+def test_金額の多くに円記号が付くレシートでは円記号の無い数字の行を品目にしない() -> None:
+    # レジ担当者名とレジ番号のような行
+    receipt = parse_receipt(
+        [DATE, "やまだ 5519", "パン ¥200", "牛乳 ¥180", "値引 -20", "小計 ¥360", "合計 ¥360"]
+    )
+
+    assert [i.name for i in receipt.items] == ["パン", "牛乳", "値引"]
+
+
+def test_住所の行は品目にしない() -> None:
+    receipt = parse_receipt([DATE, "東京都千代田区見本町1丁目2-3", "パン ¥200", "合計 ¥200"])
+
+    assert [i.name for i in receipt.items] == ["パン"]
+
+
+def test_JANの行に付いた金額は直前の品名の金額にする() -> None:
+    # 印字の位置がずれて、前の品目の金額が次の品目のJANと同じ行に読まれることがある
+    receipt = parse_receipt(
+        [DATE, "#021 JAN4900000000001", "ハンガー", "#021 JAN4900000000002 874内", "合計 ¥874"]
+    )
+
+    assert [(i.name, i.amount) for i in receipt.items] == [("ハンガー", 874)]
+
+
+def test_読み切れなかった単価の行は品名として扱わない() -> None:
+    receipt = parse_receipt([DATE, "ハンガー", "@437 ×", "874内", "合計 ¥874"])
+
+    assert [(i.name, i.amount) for i in receipt.items] == [("ハンガー", 874)]
+
+
+def test_数字と記号だけの品名は品目にしない() -> None:
+    receipt = parse_receipt([DATE, "-1 295", "パン ¥200", "合計 ¥200"])
+
+    assert [i.name for i in receipt.items] == ["パン"]
+
+
+def test_税額の合計行があれば税率ごとの内訳と二重に数えない() -> None:
+    receipt = parse_receipt(
+        [
+            DATE,
+            "パン ¥300",
+            "小計 ¥300",
+            "外税額計 ¥24",
+            "10%消費税等 ¥8",
+            "8%消費税等 ¥16",
+            "合計 ¥324",
+        ]
+    )
+
+    assert receipt.tax == 24
+
+
+def test_合計の行が無ければ支払金額を合計にする() -> None:
+    receipt = parse_receipt([DATE, "パン ¥200", "支払金額 ¥200"])
+
+    assert receipt.total == 200
