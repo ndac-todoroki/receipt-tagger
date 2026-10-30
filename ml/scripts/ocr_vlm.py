@@ -4,6 +4,7 @@ OCR を GPU の VLM に置き換えるかを決めるための実験スクリプ
 OpenAI 互換 API を持つ推論サーバー（SGLang 等）を立ててから実行する。
 
     python ocr_vlm.py <画像フォルダ> <出力フォルダ> --mode lines|struct [--url URL] [--limit N]
+        [--prompt 指示文]
 
 - lines: 文字を行ごとに書き出させる（OCR だけを置き換え、行の組み立て以降は既存のパーサを使う案）
 - struct: 店名・品目・金額・合計を JSON で出させる（パーサまで置き換える案）
@@ -72,7 +73,9 @@ def _image_data_url(path: Path) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def _request(url: str, model: str, mode: str, image_url: str) -> str:
+def _request(url: str, model: str, mode: str, image_url: str, prompt: str | None) -> str:
+    if prompt is None:
+        prompt = LINES_PROMPT if mode == "lines" else STRUCT_PROMPT
     body: dict[str, object] = {
         "model": model,
         "messages": [
@@ -80,7 +83,7 @@ def _request(url: str, model: str, mode: str, image_url: str) -> str:
                 "role": "user",
                 "content": [
                     {"type": "image_url", "image_url": {"url": image_url}},
-                    {"type": "text", "text": LINES_PROMPT if mode == "lines" else STRUCT_PROMPT},
+                    {"type": "text", "text": prompt},
                 ],
             }
         ],
@@ -110,13 +113,15 @@ def main() -> None:
     parser.add_argument("--url", default="http://localhost:30000/v1/chat/completions")
     parser.add_argument("--model", default="default")
     parser.add_argument("--limit", type=int, default=None)
+    # OCR 専用モデルは決まった指示文（例: GLM-OCR の "Text Recognition:"）で学習されている
+    parser.add_argument("--prompt", default=None)
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     images = sorted(p for p in args.image_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg"})
     for path in images[: args.limit]:
         start = time.perf_counter()
-        content = _request(args.url, args.model, args.mode, _image_data_url(path))
+        content = _request(args.url, args.model, args.mode, _image_data_url(path), args.prompt)
         elapsed = time.perf_counter() - start
         result = {"image": path.name, "mode": args.mode, "elapsed": elapsed, "content": content}
         out = args.out_dir / f"{path.stem}.json"
