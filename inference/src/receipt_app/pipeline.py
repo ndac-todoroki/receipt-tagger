@@ -5,7 +5,7 @@
 """
 
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from PIL import Image
 
@@ -20,6 +20,11 @@ from receipt_app.stages.store_genre import (
     decide_granularity,
     judge_store_genre,
 )
+from receipt_app.stages.vlm_reader import VlmReceiptReader
+
+# 読み取りの方式。ocr は比較用に残している旧方式（stages/ocr_reader）
+ReaderKind = Literal["vlm", "ocr"]
+DEFAULT_VLM_URL = "http://localhost:30000/v1/chat/completions"
 
 # 店名の候補を検索する上限。Nominatim は1秒1回までなので、待ち時間を抑えるため絞る
 MAX_STORE_QUERIES = 3
@@ -53,11 +58,17 @@ class Pipeline:
         self._item_classifier = item_classifier
 
     @classmethod
-    def load(cls, config: AppConfig, model_dir: Path | None = None) -> "Pipeline":
+    def load(
+        cls,
+        config: AppConfig,
+        model_dir: Path | None = None,
+        reader: ReaderKind = "vlm",
+        vlm_url: str = DEFAULT_VLM_URL,
+    ) -> "Pipeline":
         """本物のモデルを読み込んだパイプラインを作る。起動時に1回だけ呼ぶ。"""
         return cls(
             config=config,
-            reader=_load_ocr_reader(model_dir),
+            reader=VlmReceiptReader(vlm_url) if reader == "vlm" else _load_ocr_reader(model_dir),
             search=NominatimClient(),
             item_classifier=EmbeddingItemGenreClassifier.load(config),
         )
@@ -132,6 +143,7 @@ class Pipeline:
 
 
 def _load_ocr_reader(model_dir: Path | None) -> ReceiptReader:
+    # RapidOCR は重いので、旧方式を選んだときだけ読み込む
     from receipt_app.stages.ocr_reader.ocr import RapidOcrReader
     from receipt_app.stages.ocr_reader.reader import OcrReceiptReader
 

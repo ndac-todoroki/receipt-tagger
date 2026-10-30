@@ -1,16 +1,18 @@
 """推論APIの入出力の約束事を確かめるテスト。
 
-確かめること: 画像を受け取って結果JSONを返す、不正な入力を弾く。
+確かめること: 画像を受け取って結果JSONを返す、不正な入力を弾く、読み取りの失敗を伝える。
 確かめないこと: 各段の判定の正しさ（段ごとのテストで扱う）。
 """
 
 import io
+from collections.abc import Callable
 
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from receipt_app.main import create_app
 from receipt_app.schemas import AnalyzeResult, ConsistencyResult, StoreResult
+from receipt_app.stages.receipt import ReadError
 
 FAKE_RESULT = AnalyzeResult(
     store=StoreResult(name="サンプルマート", genre="コンビニ", status="confirmed"),
@@ -31,8 +33,16 @@ def _png_bytes() -> bytes:
     return buf.getvalue()
 
 
-def _client(max_upload_bytes: int = 10_000_000) -> TestClient:
-    return TestClient(create_app(analyzer=_fake_analyzer, max_upload_bytes=max_upload_bytes))
+def _failing_analyzer(image: Image.Image) -> AnalyzeResult:
+    raise ReadError("推論サーバーに問い合わせられない")
+
+
+def _client(
+    max_upload_bytes: int = 10_000_000,
+    analyzer: Callable[[Image.Image], AnalyzeResult] | None = None,
+) -> TestClient:
+    app = create_app(analyzer=analyzer or _fake_analyzer, max_upload_bytes=max_upload_bytes)
+    return TestClient(app)
 
 
 def test_ヘルスチェックはokを返す() -> None:
@@ -62,3 +72,12 @@ def test_上限を超えるサイズは413で弾く() -> None:
     )
 
     assert res.status_code == 413
+
+
+def test_レシートを読み取れなければ502で理由を返す() -> None:
+    res = _client(analyzer=_failing_analyzer).post(
+        "/api/analyze", files={"image": ("r.png", _png_bytes(), "image/png")}
+    )
+
+    assert res.status_code == 502
+    assert res.json()["detail"] == "レシートを読み取れませんでした。時間をおいて試してください"

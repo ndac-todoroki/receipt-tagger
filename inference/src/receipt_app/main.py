@@ -5,6 +5,7 @@ import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import get_args
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -13,6 +14,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from receipt_app.config import load_config
 from receipt_app.schemas import AnalyzeResult
+from receipt_app.stages.receipt import ReadError
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 REPO_CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
@@ -22,11 +24,19 @@ Analyzer = Callable[[Image.Image], AnalyzeResult]
 
 def _load_pipeline() -> Analyzer:
     # モデルの読み込みは重いので、テストで偽の解析関数を渡す場合は読み込まない
-    from receipt_app.pipeline import Pipeline
+    from receipt_app.pipeline import DEFAULT_VLM_URL, Pipeline, ReaderKind
 
     config_dir = Path(os.environ.get("CONFIG_DIR", REPO_CONFIG_DIR))
     model_dir = os.environ.get("MODEL_DIR")
-    pipeline = Pipeline.load(load_config(config_dir), Path(model_dir) if model_dir else None)
+    reader = os.environ.get("RECEIPT_READER", "vlm")
+    if reader not in get_args(ReaderKind):
+        raise ValueError(f"RECEIPT_READER は vlm か ocr: {reader}")
+    pipeline = Pipeline.load(
+        load_config(config_dir),
+        Path(model_dir) if model_dir else None,
+        reader=reader,  # type: ignore[arg-type]
+        vlm_url=os.environ.get("VLM_URL", DEFAULT_VLM_URL),
+    )
     return pipeline.analyze
 
 
@@ -65,8 +75,13 @@ def create_app(
         # スマホの写真は向きがEXIFに入っているので、画素を正しい向きに直してから読む
         upright = ImageOps.exif_transpose(img).convert("RGB")
         # 画像はディスクに保存せず、メモリ上で処理して破棄する。
-        # OCRはCPUを長く使うので、イベントループを止めないよう別スレッドで動かす
-        return await run_in_threadpool(state["analyze"], upright)
+        # 読み取りは推論サーバーの応答を数秒待つので、イベントループを止めないよう別スレッドで動かす
+        try:
+            return await run_in_threadpool(state["analyze"], upright)
+        except ReadError as e:
+            raise HTTPException(
+                status_code=502, detail="レシートを読み取れませんでした。時間をおいて試してください"
+            ) from e
 
     if static_dir is not None and static_dir.is_dir():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
