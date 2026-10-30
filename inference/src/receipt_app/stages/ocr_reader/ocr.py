@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from receipt_app.stages.lines import OcrBox
+from receipt_app.stages.ocr_reader.lines import OcrBox
 
 
 class RapidOcrReader:

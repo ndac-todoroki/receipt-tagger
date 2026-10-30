@@ -8,7 +8,7 @@
 
 import pytest
 
-from receipt_app.stages.receipt_parser import parse_amount, parse_receipt
+from receipt_app.stages.ocr_reader.receipt_parser import parse_amount, parse_receipt
 
 DATE = "2026年10月1日（水）12:00"
 

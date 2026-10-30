@@ -1,6 +1,6 @@
 """各段を組み立てて、レシート1枚を解析する。
 
-OCR → 行の組み立て → 店名候補・品目・合計の抽出 → 店の検索と店ジャンル判定
+読み取り（店名候補・品目・合計） → 店の検索と店ジャンル判定
 → 判定粒度の決定 → 品目ジャンル分類 → 整合性チェック
 """
 
@@ -14,8 +14,7 @@ from receipt_app.schemas import AnalyzeResult, ItemResult, StoreResult
 from receipt_app.search import NominatimClient
 from receipt_app.stages.consistency import check_consistency
 from receipt_app.stages.item_genre import EmbeddingItemGenreClassifier, ItemGenreJudgement
-from receipt_app.stages.lines import OcrBox, group_rows
-from receipt_app.stages.receipt_parser import ParsedItem, parse_receipt
+from receipt_app.stages.receipt import ParsedItem, ParsedReceipt
 from receipt_app.stages.store_genre import (
     StoreGenreJudgement,
     decide_granularity,
@@ -26,8 +25,8 @@ from receipt_app.stages.store_genre import (
 MAX_STORE_QUERIES = 3
 
 
-class OcrReader(Protocol):
-    def read(self, image: Image.Image) -> list[OcrBox]: ...
+class ReceiptReader(Protocol):
+    def read(self, image: Image.Image) -> ParsedReceipt: ...
 
 
 class StoreSearch(Protocol):
@@ -44,12 +43,12 @@ class Pipeline:
     def __init__(
         self,
         config: AppConfig,
-        ocr: OcrReader,
+        reader: ReceiptReader,
         search: StoreSearch,
         item_classifier: ItemClassifier,
     ) -> None:
         self._config = config
-        self._ocr = ocr
+        self._reader = reader
         self._search = search
         self._item_classifier = item_classifier
 
@@ -58,15 +57,14 @@ class Pipeline:
         """本物のモデルを読み込んだパイプラインを作る。起動時に1回だけ呼ぶ。"""
         return cls(
             config=config,
-            ocr=_load_ocr(model_dir),
+            reader=_load_ocr_reader(model_dir),
             search=NominatimClient(),
             item_classifier=EmbeddingItemGenreClassifier.load(config),
         )
 
     def analyze(self, image: Image.Image) -> AnalyzeResult:
         """レシート画像を解析して結果を返す。"""
-        rows = [row.text for row in group_rows(self._ocr.read(image))]
-        receipt = parse_receipt(rows)
+        receipt = self._reader.read(image)
 
         store_name, store = self._judge_store(receipt.store_candidates)
         granularity = decide_granularity(
@@ -133,7 +131,9 @@ class Pipeline:
         return results
 
 
-def _load_ocr(model_dir: Path | None) -> OcrReader:
-    from receipt_app.stages.ocr import RapidOcrReader
+def _load_ocr_reader(model_dir: Path | None) -> ReceiptReader:
+    from receipt_app.stages.ocr_reader.ocr import RapidOcrReader
+    from receipt_app.stages.ocr_reader.reader import OcrReceiptReader
 
-    return RapidOcrReader(model_dir=None if model_dir is None else model_dir / "rapidocr")
+    ocr = RapidOcrReader(model_dir=None if model_dir is None else model_dir / "rapidocr")
+    return OcrReceiptReader(ocr)

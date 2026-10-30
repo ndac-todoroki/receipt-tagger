@@ -6,31 +6,10 @@
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
+from receipt_app.stages.receipt import ParsedItem, ParsedReceipt
 from receipt_app.stages.store_name import normalize_store_name
-
-
-@dataclass(frozen=True)
-class ParsedItem:
-    """品目1つ。値引きは負の金額の品目として表す。"""
-
-    name: str
-    amount: int
-    quantity: int = 1
-    unit_price: int | None = None
-
-
-@dataclass(frozen=True)
-class ParsedReceipt:
-    """レシート1枚から取り出した内容。store_candidates は確からしい順。"""
-
-    store_candidates: list[str] = field(default_factory=list)
-    items: list[ParsedItem] = field(default_factory=list)
-    subtotal: int | None = None
-    tax: int | None = None
-    total: int | None = None
-
 
 # 末尾の金額。¥ が * に読まれる、カンマがピリオドに読まれる、税区分の印が付く、を許す
 _AMOUNT_TAIL = re.compile(

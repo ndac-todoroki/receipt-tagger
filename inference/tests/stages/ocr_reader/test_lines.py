@@ -4,7 +4,7 @@
 確かめないこと: 文字の読み取り（OCRモデルの責務）。
 """
 
-from receipt_app.stages.lines import OcrBox, group_rows
+from receipt_app.stages.ocr_reader.lines import OcrBox, group_rows
 
 
 def _box(text: str, x: float, y: float, w: float = 50, h: float = 20) -> OcrBox:

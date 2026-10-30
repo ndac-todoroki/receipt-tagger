@@ -15,7 +15,7 @@ import statistics
 from pathlib import Path
 
 from receipt_app.stages.consistency import check_consistency
-from receipt_app.stages.receipt_parser import parse_receipt
+from receipt_app.stages.ocr_reader.receipt_parser import parse_receipt
 
 
 def _from_lines(content: str) -> dict[str, object]:

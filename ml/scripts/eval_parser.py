@@ -13,8 +13,8 @@ import json
 from pathlib import Path
 
 from receipt_app.stages.consistency import check_consistency
-from receipt_app.stages.lines import OcrBox, group_rows
-from receipt_app.stages.receipt_parser import parse_receipt
+from receipt_app.stages.ocr_reader.lines import OcrBox, group_rows
+from receipt_app.stages.ocr_reader.receipt_parser import parse_receipt
 
 
 def main() -> None:
