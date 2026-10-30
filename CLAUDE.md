@@ -7,9 +7,9 @@
 
 ## 最重要ルール（修了要件。ユーザーの指示なしに変えない）
 
-1. 推論の本体は、リポジトリ内のPythonコードでモデルをロードして実行する（transformers / ONNX Runtime / PyTorch）
+1. 推論は、自分たちの環境（DGX Spark）で動かすモデルで行う。Hugging Face 等の公開モデルをそのまま、または量子化（NVFP4 等）して使ってよい
 2. ジャンル判定を外部LLM API（OpenAI、HF Inference API等）に置き換えない。外部APIは店情報の検索のみ
-3. デプロイ物の推論に Ollama・vLLM 等の配信サーバーを使わない（事前ラベル付け・実験では可）
+3. 推論には transformers / ONNX Runtime / PyTorch のほか、Ollama・vLLM・SGLang・llama.cpp 等の配信サーバーを使ってよい（自前の環境で動かすものに限る）
 4. 学習に使ったノートブック・スクリプトを削除・移動しない
 5. 期限が近いので、**端から端まで動く最小構成を最優先**する。精度改善・拡張機能は後回し
 
