@@ -31,9 +31,13 @@ def _from_lines(content: str) -> dict[str, object]:
 
 
 def _from_struct(content: str) -> dict[str, object] | None:
+    # 制約付き生成を使えないモデルは ```json などで囲んで返すので、最も外側の {} だけを読む
+    start, end = content.find("{"), content.rfind("}")
     try:
-        data = json.loads(content)
+        data = json.loads(content[start : end + 1])
     except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
         return None
     return {
         "store": data.get("store_name"),

@@ -65,9 +65,15 @@ STRUCT_SCHEMA = {
 }
 
 
-def _image_data_url(path: Path) -> str:
+def load_image(path: Path) -> Image.Image:
+    """写真の向きを直し、長辺を MAX_SIDE 以下に縮めて読み込む。"""
     img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
     img.thumbnail((MAX_SIDE, MAX_SIDE))
+    return img
+
+
+def _image_data_url(path: Path) -> str:
+    img = load_image(path)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=92)
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
