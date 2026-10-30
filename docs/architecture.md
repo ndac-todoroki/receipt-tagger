@@ -26,9 +26,7 @@ flowchart LR
         STATIC["静的配信<br/>Solid.jsのビルド成果物"]
         API["API層<br/>サイズ検証 / レート制限"]
         P1["段1 領域抽出<br/>OpenCV"]
-        P2["段2 OCR<br/>既存モデルを推論利用"]
-        P3["段3 行の役割分類"]
-        P4["段4 品目の項目抽出<br/>ルール＋必要時モデル"]
+        P2["段2〜4 読み取り<br/>VLMの応答JSONを検証・変換"]
         CHK["整合性チェック<br/>品目合計 = 合計金額"]
         NORM["店名正規化"]
         SRCH["検索クライアント<br/>店名のみ送信"]
@@ -36,6 +34,10 @@ flowchart LR
         MAP["判定粒度の決定<br/>genre_map.yaml"]
         P6["段6 品目ジャンル分類<br/>既存モデル（余裕があればFT）"]
         CACHE[("店名→店ジャンル<br/>キャッシュ")]
+    end
+
+    subgraph VLM["読み取りコンテナ: vLLM（compose内部のみ）"]
+        QW["Qwen3.6-35B-A3B NVFP4<br/>画像→店名・品目・合計のJSON"]
     end
 
     subgraph Ext["外部サービス（補助）"]
@@ -49,9 +51,10 @@ flowchart LR
     STATIC -.->|"画面を配信"| UI
     U -->|"画像アップロード"| UI
     UI -->|"POST /api/analyze"| API
-    API --> P1 --> P2 --> P3
-    P3 -->|"品目行"| P4 --> CHK
-    P3 -->|"店名行"| NORM --> CACHE
+    API --> P1 --> P2
+    P2 <-->|"画像 / JSON"| QW
+    P2 -->|"品目・合計"| CHK
+    P2 -->|"店名"| NORM --> CACHE
     CACHE -->|"ヒット"| MAP
     CACHE -->|"ミス"| SRCH
     SRCH -->|"店名のみ"| SE
@@ -65,13 +68,14 @@ flowchart LR
     RES -->|"JSON"| UI
     UI -->|"表示"| U
 
-    W -.->|"起動時にロード"| P2
+    W -.->|"起動時にロード"| QW
     W -.-> P6
 ```
 
 **ポイント**
 
-- 外部サービスはOpenStreetMapの店舗検索のみ。OCRと品目ジャンル分類はすべてアプリコンテナ内の自前コードで動く
+- 外部サービスはOpenStreetMapの店舗検索のみ。読み取りと品目ジャンル分類は、DGX Spark 上の自前のコンテナで動く
+- 読み取りは、旧方式（OCR→行の組み立て→ルールのパーサ）から視覚言語モデルに置き換えた（2026-10-30）。旧方式のコードは `stages/` に残し、比較に使う
 - 検索に送るのは店名だけで、画像やレシートの他の情報は外部に出ない
 - キャッシュにより、同じ店は再検索しない。検索失敗時はキャッシュ、なければ「判定不能」で縮退する
 
@@ -85,15 +89,20 @@ sequenceDiagram
     actor User as ユーザー
     participant Web as 画面（Solid.js）
     participant Inf as FastAPI
+    participant VLM as vLLM
     participant Cache as キャッシュ
     participant Search as Nominatim
 
     User->>Web: レシート画像をアップロード
     Web->>Inf: POST /api/analyze（画像）
     Inf->>Inf: 領域抽出・補正（失敗時は原画像）
-    Inf->>Inf: OCR（行テキスト＋座標）
-    Inf->>Inf: 行の役割分類
-    Inf->>Inf: 品目の項目抽出と整合性チェック
+    Inf->>VLM: 画像と指示文（JSONスキーマを指定）
+    alt 応答が正しいJSON
+        VLM-->>Inf: 店名・品目・小計・外税・合計
+    else 壊れた応答・タイムアウト
+        Inf-->>Web: 読み取り失敗
+    end
+    Inf->>Inf: 整合性チェック
     Inf->>Inf: 店名の正規化
 
     alt キャッシュにヒット
@@ -131,15 +140,20 @@ flowchart TB
         direction TB
         Tun["cloudflared"]
         App["app<br/>FastAPI + transformers<br/>Solid.jsを静的配信"]
+        VL["vllm<br/>Qwen3.6-35B-A3B NVFP4"]
         Vol[("models ボリューム")]
+        HF[("Hugging Face キャッシュ")]
     end
 
     CF --> Tun --> App
+    App -->|"compose内部のみ"| VL
     Vol -.-> App
+    HF -.-> VL
     App -->|"店名のみ"| Search["OpenStreetMap<br/>Nominatim"]
 ```
 
 - 各サービスに `restart: unless-stopped` を付け、DGX Sparkの再起動後に自動で復帰させる
+- vLLM は CPU と GPU で共有するメモリを起動時に計測する。他のプロセスの増減で計測が揺れて失敗するので、KV キャッシュの量と使用率の上限を固定する
 - クラウドでのCPU構成（旧方針B・C）は採用しない
 
 ---
@@ -195,7 +209,7 @@ flowchart TB
 receipt-tagger/
 ├── CLAUDE.md
 ├── README.md
-├── docker-compose.yml          # app + cloudflared
+├── docker-compose.yml          # app + vllm + cloudflared
 ├── .env.example
 ├── .gitignore
 ├── config/
