@@ -6,8 +6,51 @@ services:
     ports:
       # DGX Spark では 8000 を NIM が使っているため、ホスト側は既定で 8080 にする
       - "127.0.0.1:${APP_PORT:-8080}:8000"
+    environment:
+      # 読み取りは下の vllm に任せる。compose 内部のネットワークだけで通信する
+      - VLM_URL=http://vllm:8000/v1/chat/completions
     volumes:
       - models:/models
+    # vllm の起動（モデルの読み込みに数分かかる）は待たない。準備が済むまでの読み取りは
+    # 「読み取れませんでした」になる
+    depends_on:
+      - vllm
+    restart: unless-stopped
+
+  # 読み取り用の視覚言語モデル（Qwen3.6-35B-A3B の NVFP4 版）を配信する。外部には公開しない
+  vllm:
+    image: nvcr.io/nvidia/vllm:26.10-py3
+    command:
+      - vllm
+      - serve
+      - RedHatAI/Qwen3.6-35B-A3B-NVFP4
+      - --served-model-name=default
+      - --host=0.0.0.0
+      - --port=8000
+      - --reasoning-parser=qwen3
+      # Spark は CPU と GPU でメモリを共有しており、起動時のメモリ計測が他プロセスの増減で
+      # 揺れて失敗するので、KV キャッシュの量を固定する。上限も他と同居できる程度に抑える
+      - --kv-cache-memory-bytes=8G
+      - --gpu-memory-utilization=0.4
+      - --max-model-len=16384
+    volumes:
+      # 重み（約22GB）を再ダウンロードしないよう、ホストの Hugging Face キャッシュを使う
+      - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/root/.cache/huggingface
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      start_period: 600s
     restart: unless-stopped
 
   # 公開用。Cloudflare Zero Trust で作ったトンネルのトークンを .env に置いて
