@@ -25,3 +25,7 @@ class ParsedReceipt:
     subtotal: int | None = None
     tax: int | None = None
     total: int | None = None
+
+
+class ReadError(Exception):
+    """レシートを読み取れなかった（推論サーバーの障害、壊れた応答など）。"""
