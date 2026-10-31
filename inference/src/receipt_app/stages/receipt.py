@@ -8,12 +8,17 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class ParsedItem:
-    """品目1つ。値引きは負の金額の品目として表す。"""
+    """品目1つ。
+
+    amount は割引を引いた後の金額で、discount はその品目に付いた割引の額（正の数）。
+    どの品目にも付かない値引きは、負の金額の品目として表す。
+    """
 
     name: str
     amount: int
     quantity: int = 1
     unit_price: int | None = None
+    discount: int = 0
 
 
 @dataclass(frozen=True)
