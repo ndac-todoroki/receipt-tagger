@@ -28,10 +28,10 @@ class Encoder(Protocol):
 
 @dataclass(frozen=True)
 class ItemGenreJudgement:
-    """品目ジャンルの判定結果。candidates は確率の高い順。"""
+    """品目ジャンルの判定結果。candidates は確率の高い順。判定不能なら genre は None。"""
 
-    genre: str
-    confidence: float
+    genre: str | None
+    confidence: float | None
     status: JudgeStatus
     candidates: list[str] = field(default_factory=list)
 

@@ -16,6 +16,7 @@ from receipt_app.search import NominatimClient
 from receipt_app.stages.consistency import check_consistency
 from receipt_app.stages.item_cleanup import fix_quantities, merge_discounts
 from receipt_app.stages.item_genre import EmbeddingItemGenreClassifier, ItemGenreJudgement
+from receipt_app.stages.llm_item_genre import LlmItemGenreClassifier
 from receipt_app.stages.receipt import ParsedItem, ParsedReceipt
 from receipt_app.stages.store_genre import (
     StoreGenreJudgement,
@@ -26,6 +27,9 @@ from receipt_app.stages.vlm_reader import VlmReceiptReader
 
 # 読み取りの方式。ocr は比較用に残している旧方式（stages/ocr_reader）
 ReaderKind = Literal["vlm", "ocr"]
+# 品目ジャンルの分類器。embedding は埋め込みの類似度、
+# llm は読み取りと同じ LLM の制約付きデコーディング
+ItemClassifierKind = Literal["embedding", "llm"]
 DEFAULT_VLM_URL = "http://localhost:30000/v1/chat/completions"
 
 # 店名の候補を検索する上限。Nominatim は1秒1回までなので、待ち時間を抑えるため絞る
@@ -66,13 +70,18 @@ class Pipeline:
         model_dir: Path | None = None,
         reader: ReaderKind = "vlm",
         vlm_url: str = DEFAULT_VLM_URL,
+        item_classifier: ItemClassifierKind = "embedding",
     ) -> "Pipeline":
         """本物のモデルを読み込んだパイプラインを作る。起動時に1回だけ呼ぶ。"""
         return cls(
             config=config,
             reader=VlmReceiptReader(vlm_url) if reader == "vlm" else _load_ocr_reader(model_dir),
             search=NominatimClient(),
-            item_classifier=EmbeddingItemGenreClassifier.load(config),
+            item_classifier=(
+                LlmItemGenreClassifier.load(config, vlm_url)
+                if item_classifier == "llm"
+                else EmbeddingItemGenreClassifier.load(config)
+            ),
         )
 
     def analyze(self, image: Image.Image) -> AnalyzeResult:
@@ -141,7 +150,7 @@ class Pipeline:
                     amount=item.amount,
                     discount=item.discount,
                     genre=j.genre if j else None,
-                    category=self._config.labels.category_of(j.genre) if j else None,
+                    category=self._config.labels.category_of(j.genre) if j and j.genre else None,
                     confidence=j.confidence if j else None,
                     status=j.status if j else "confirmed",
                     candidates=j.candidates if j else [],

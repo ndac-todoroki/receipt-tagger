@@ -24,18 +24,22 @@ Analyzer = Callable[[Image.Image], AnalyzeResult]
 
 def _load_pipeline() -> Analyzer:
     # モデルの読み込みは重いので、テストで偽の解析関数を渡す場合は読み込まない
-    from receipt_app.pipeline import DEFAULT_VLM_URL, Pipeline, ReaderKind
+    from receipt_app.pipeline import DEFAULT_VLM_URL, ItemClassifierKind, Pipeline, ReaderKind
 
     config_dir = Path(os.environ.get("CONFIG_DIR", REPO_CONFIG_DIR))
     model_dir = os.environ.get("MODEL_DIR")
     reader = os.environ.get("RECEIPT_READER", "vlm")
     if reader not in get_args(ReaderKind):
         raise ValueError(f"RECEIPT_READER は vlm か ocr: {reader}")
+    item_classifier = os.environ.get("ITEM_CLASSIFIER", "embedding")
+    if item_classifier not in get_args(ItemClassifierKind):
+        raise ValueError(f"ITEM_CLASSIFIER は embedding か llm: {item_classifier}")
     pipeline = Pipeline.load(
         load_config(config_dir),
         Path(model_dir) if model_dir else None,
         reader=reader,  # type: ignore[arg-type]
         vlm_url=os.environ.get("VLM_URL", DEFAULT_VLM_URL),
+        item_classifier=item_classifier,  # type: ignore[arg-type]
     )
     return pipeline.analyze
 
