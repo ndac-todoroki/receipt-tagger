@@ -136,13 +136,11 @@ class Pipeline:
     def _judge_items(self, items: list[ParsedItem], per_item: bool) -> list[ItemResult]:
         # 値引きは品物ではないので分類しない
         targets = [i for i in items if per_item and i.amount + i.discount > 0]
-        judged = dict(
-            zip(
-                map(id, targets),
-                self._item_classifier.classify([i.name for i in targets]),
-                strict=True,
-            )
-        )
+        # 同じ品名は1回だけ分類する。LLM は同時に処理する問い合わせの組み合わせで
+        # 結果が揺れることがあり、同じレシートの同じ商品が別のジャンルになったため
+        names = list(dict.fromkeys(i.name for i in targets))
+        by_name = dict(zip(names, self._item_classifier.classify(names), strict=True))
+        judged = {id(i): by_name[i.name] for i in targets}
         results = []
         for item in items:
             j = judged.get(id(item))

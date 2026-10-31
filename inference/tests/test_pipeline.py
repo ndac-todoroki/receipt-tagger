@@ -100,6 +100,15 @@ def test_品目ジャンルの小分類に対応する大分類を返す() -> No
     assert result.item_categories["菓子・スナック"] == "菓子"
 
 
+def test_同じ品名は1回だけ分類して同じジャンルにする() -> None:
+    receipt = _receipt("サンプルマート", ("ポテチ", 150), ("ポテチ", 150), total=300)
+
+    result, _, classifier = _run(receipt, {"サンプルマート": ["shop=convenience"]})
+
+    assert classifier.names == ["ポテチ"]
+    assert [i.genre for i in result.items] == ["菓子・スナック", "菓子・スナック"]
+
+
 def test_全体で1ジャンルの店では品目を分類しない() -> None:
     receipt = _receipt("サンプル食堂", ("定食", 800), total=800)
 
