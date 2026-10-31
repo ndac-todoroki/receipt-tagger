@@ -4,15 +4,17 @@ import io
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException, MultiPartParser
 
 from receipt_app.analysis_queue import AnalysisQueue, QueueEvent, QueueFull
 from receipt_app.config import load_config
@@ -21,6 +23,20 @@ from receipt_app.schemas import AnalyzeResult
 from receipt_app.stages.receipt import ReadError
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# multipart の区切りや見出しの分として、画像の上限に足して受け取る量
+MULTIPART_OVERHEAD_BYTES = 64 * 1024
+# 画素数の上限。5000万画素のスマホの写真まで受け付ける。小さなファイルでも展開すると
+# 巨大になる画像（解凍爆弾）を、展開する前に弾く
+DEFAULT_MAX_PIXELS = 52_000_000
+# スマホのブラウザが送ってくる形式に限り、珍しい形式の解析コードを外から呼ばせない
+ALLOWED_IMAGE_FORMATS = ["JPEG", "PNG", "WEBP"]
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    # 他のサイトに埋め込ませない（埋め込んで誤操作を誘う手口を防ぐ）
+    "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
 # 待っている依頼の上限。1件に約10秒かかるので、10件なら最後の人は約2分待つ
 DEFAULT_MAX_WAITING = 10
 # 同じ相手からの依頼の上限（期間の秒数, 回数）。1件に約10秒かかるので、
@@ -65,6 +81,7 @@ def create_app(
     static_dir: Path | None = None,
     rate_limits: list[tuple[float, int]] | None = None,
     queue: AnalysisQueue | None = None,
+    max_pixels: int = DEFAULT_MAX_PIXELS,
 ) -> FastAPI:
     """アプリを組み立てる。analyzer を省くと、起動時に本物のパイプラインを読み込む。"""
     state: dict[str, Analyzer] = {} if analyzer is None else {"analyze": analyzer}
@@ -76,7 +93,19 @@ def create_app(
             state["analyze"] = _load_pipeline()
         yield
 
-    app = FastAPI(title="receipt-tagger", lifespan=lifespan)
+    # API の説明ページは公開しない（使うのは自前の画面だけなので）
+    app = FastAPI(
+        title="receipt-tagger", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
+    )
+
+    @app.middleware("http")
+    async def add_security_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
+        response.headers.update(SECURITY_HEADERS)
+        return response
+
     queue = queue or AnalysisQueue(max_waiting=DEFAULT_MAX_WAITING)
     limiter = RateLimiter(rate_limits or DEFAULT_RATE_LIMITS)
 
@@ -85,24 +114,14 @@ def create_app(
         return {"status": "ok"}
 
     @app.post("/api/analyze")
-    async def analyze(image: UploadFile, request: Request) -> StreamingResponse:
+    async def analyze(request: Request) -> StreamingResponse:
         if not limiter.allow(_client_ip(request)):
             raise HTTPException(
                 status_code=429, detail="続けて送りすぎです。時間をおいて試してください"
             )
         if queue.full:
             raise HTTPException(status_code=503, detail=BUSY_DETAIL)
-        # 上限+1バイトだけ読めば超過を判定でき、巨大ファイルを丸ごとメモリに載せずに済む
-        data = await image.read(max_upload_bytes + 1)
-        if len(data) > max_upload_bytes:
-            raise HTTPException(status_code=413, detail="画像が大きすぎます")
-        try:
-            img = Image.open(io.BytesIO(data))
-            img.load()
-        except UnidentifiedImageError as e:
-            raise HTTPException(status_code=415, detail="画像として読み込めません") from e
-        # スマホの写真は向きがEXIFに入っているので、画素を正しい向きに直してから読む
-        upright = ImageOps.exif_transpose(img).convert("RGB")
+        upright = _decode_image(await _read_upload(request, max_upload_bytes), max_pixels)
         # 画像はディスクに保存せず、メモリ上で処理して破棄する
         events = queue.run(lambda on_stage: state["analyze"](upright, on_stage))
         return StreamingResponse(
@@ -116,6 +135,73 @@ def create_app(
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
     return app
+
+
+class _InMemoryMultiPartParser(MultiPartParser):
+    """受け取ったファイルを一時ファイルに書かず、メモリにだけ置く multipart のパーサ。
+
+    Starlette の既定では 1MB を超えるファイルをディスクの一時ファイルに書く。
+    受け取る本体の大きさを先に spool_max_size 以下に抑えておけば、ディスクに切り替わらない。
+    """
+
+    def __init__(self, *args: Any, spool_max_size: int, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.spool_max_size = spool_max_size
+
+
+async def _read_upload(request: Request, max_upload_bytes: int) -> bytes:
+    """フォームの image を、ディスクに書かずにメモリへ読む。上限を超えた時点で 413。"""
+    too_large = HTTPException(status_code=413, detail="画像が大きすぎます")
+    limit = max_upload_bytes + MULTIPART_OVERHEAD_BYTES
+    if not request.headers.get("content-type", "").startswith("multipart/form-data"):
+        raise HTTPException(status_code=415, detail="画像をフォームで送ってください")
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > limit:
+        raise too_large
+    # Content-Length が無い・偽っている場合に備え、読みながら数えて打ち切る
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > limit:
+            raise too_large
+
+    async def replay() -> AsyncIterator[bytes]:
+        yield bytes(body)
+
+    parser = _InMemoryMultiPartParser(
+        request.headers, replay(), max_files=1, max_fields=1, spool_max_size=limit
+    )
+    try:
+        form = await parser.parse()
+    except MultiPartException as e:
+        raise HTTPException(status_code=400, detail="フォームの形が正しくありません") from e
+    image = form.get("image")
+    if not isinstance(image, UploadFile):
+        raise HTTPException(status_code=400, detail="画像がありません")
+    data = await image.read()
+    if len(data) > max_upload_bytes:
+        raise too_large
+    return data
+
+
+def _decode_image(data: bytes, max_pixels: int) -> Image.Image:
+    """画像を展開し、向きを直した RGB にする。形式の違いや壊れた画像は 415。"""
+    unreadable = HTTPException(status_code=415, detail="画像として読み込めません")
+    try:
+        # open は見出しだけを読む。画素の展開は画素数を確かめてから行う
+        img = Image.open(io.BytesIO(data), formats=ALLOWED_IMAGE_FORMATS)
+    except Image.DecompressionBombError as e:
+        raise HTTPException(status_code=413, detail="画像の画素数が多すぎます") from e
+    except (UnidentifiedImageError, OSError, ValueError) as e:
+        raise unreadable from e
+    if img.width * img.height > max_pixels:
+        raise HTTPException(status_code=413, detail="画像の画素数が多すぎます")
+    try:
+        img.load()
+        # スマホの写真は向きがEXIFに入っているので、画素を正しい向きに直してから読む
+        return ImageOps.exif_transpose(img).convert("RGB")
+    except (OSError, ValueError, SyntaxError) as e:
+        raise unreadable from e
 
 
 def _client_ip(request: Request) -> str:
