@@ -34,13 +34,46 @@ export type AnalyzeResult = {
   item_categories: Record<string, string>
 }
 
-export async function analyze(file: File): Promise<AnalyzeResult> {
+// 解析の段階。inference/src/receipt_app/pipeline.py の Stage と同じ
+export type Stage = 'reading' | 'store' | 'items'
+
+// 解析の進み具合。estimate_seconds は、その時点から終わるまでの目安
+export type Progress =
+  | { type: 'queued'; ahead: number; estimate_seconds: number }
+  | { type: 'started'; estimate_seconds: number }
+  | { type: 'stage'; stage: Stage }
+
+type StreamEvent =
+  | Progress
+  | { type: 'result'; result: AnalyzeResult }
+  | { type: 'error'; detail: string }
+
+// API は進み具合と結果を1行1つの JSON（NDJSON）で順に返す
+export async function analyze(
+  file: File,
+  onProgress: (p: Progress) => void,
+): Promise<AnalyzeResult> {
   const body = new FormData()
   body.append('image', file)
   const res = await fetch('/api/analyze', { method: 'POST', body })
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     const detail = await res.json().then((j) => j.detail, () => null)
     throw new Error(detail ?? `解析に失敗しました（${res.status}）`)
   }
-  return res.json()
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += value
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines.filter((l) => l.trim())) {
+      const event = JSON.parse(line) as StreamEvent
+      if (event.type === 'result') return event.result
+      if (event.type === 'error') throw new Error(event.detail)
+      onProgress(event)
+    }
+  }
+  throw new Error('解析の途中で接続が切れました')
 }

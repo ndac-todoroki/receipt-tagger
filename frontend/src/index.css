@@ -34,7 +34,7 @@ body {
 }
 
 main {
-  max-width: 720px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 16px;
 }
@@ -63,6 +63,7 @@ td {
   border-bottom: 1px solid var(--border);
 }
 
+th.num,
 td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -102,6 +103,122 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+/* 左に画像、右に結果。狭い画面では結果を上、画像を下に積む */
+.panes {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.pane-image img {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.pane-image {
+  position: sticky;
+  top: 16px;
+  margin-top: 12px;
+}
+
+@media (max-width: 800px) {
+  .panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pane-result {
+    order: -1;
+  }
+
+  .pane-image {
+    position: static;
+  }
+}
+
+.progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+
+.stages li::before {
+  content: '○ ';
+}
+
+.stages li.done::before {
+  content: '✓ ';
+}
+
+.stages li.current {
+  color: var(--text);
+  font-weight: bold;
+}
+
+.stages li.current::before {
+  content: '● ';
+  color: var(--accent);
+}
+
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.bar > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.5s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+
+  .bar > div {
+    transition: none;
+  }
 }
 
 footer {
