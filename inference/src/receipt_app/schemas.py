@@ -26,7 +26,9 @@ class ItemResult(BaseModel):
     amount: int
     # その品目に付いた割引の額（正の数）。amount は割引を引いた後の金額
     discount: int = 0
+    # genre は品目ジャンルの小分類、category はその大分類
     genre: str | None
+    category: str | None = None
     confidence: float | None
     status: JudgeStatus
     candidates: list[str] = []
@@ -48,3 +50,5 @@ class AnalyzeResult(BaseModel):
     items: list[ItemResult]
     total: int | None
     consistency: ConsistencyResult
+    # 品目ジャンルの小分類→大分類。画面で小分類を選び直したときに大分類を引くのに使う
+    item_categories: dict[str, str] = {}

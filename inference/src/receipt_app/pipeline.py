@@ -102,6 +102,9 @@ class Pipeline:
             items=items,
             total=receipt.total,
             consistency=consistency,
+            item_categories={
+                g: self._config.labels.category_of(g) for g in self._config.labels.item_genres
+            },
         )
 
     def _judge_store(self, candidates: list[str]) -> tuple[str | None, StoreGenreJudgement]:
@@ -138,6 +141,7 @@ class Pipeline:
                     amount=item.amount,
                     discount=item.discount,
                     genre=j.genre if j else None,
+                    category=self._config.labels.category_of(j.genre) if j else None,
                     confidence=j.confidence if j else None,
                     status=j.status if j else "confirmed",
                     candidates=j.candidates if j else [],

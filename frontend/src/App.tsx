@@ -103,6 +103,7 @@ export default function App() {
                     <th>数量</th>
                     <th>金額</th>
                     <Show when={r().granularity === 'per_item'}>
+                      <th>大分類</th>
                       <th>ジャンル</th>
                     </Show>
                   </tr>
@@ -120,11 +121,16 @@ export default function App() {
                           </Show>
                         </td>
                         <Show when={r().granularity === 'per_item'}>
+                          <td>{item.category ?? <span class="muted">—</span>}</td>
                           <td>
                             <GenreCell
                               {...item}
                               onChoose={(g) =>
-                                setResult('value', 'items', i(), { genre: g, status: 'confirmed' })
+                                setResult('value', 'items', i(), {
+                                  genre: g,
+                                  category: r().item_categories[g] ?? null,
+                                  status: 'confirmed',
+                                })
                               }
                             />
                           </td>

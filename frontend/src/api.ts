@@ -16,7 +16,9 @@ export type ItemResult = {
   amount: number
   // その品目に付いた割引の額。amount は割引を引いた後の金額
   discount: number
+  // genre は品目ジャンルの小分類、category はその大分類
   genre: string | null
+  category: string | null
   confidence: number | null
   status: JudgeStatus
   candidates: string[]
@@ -28,6 +30,8 @@ export type AnalyzeResult = {
   items: ItemResult[]
   total: number | null
   consistency: { ok: boolean | null; items_sum: number; total: number | null }
+  // 品目ジャンルの小分類→大分類
+  item_categories: Record<string, string>
 }
 
 export async function analyze(file: File): Promise<AnalyzeResult> {

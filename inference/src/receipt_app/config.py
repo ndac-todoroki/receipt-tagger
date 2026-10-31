@@ -4,16 +4,35 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 Granularity = Literal["whole", "per_item"]
 
 
 class Labels(BaseModel):
-    """店ジャンルと品目ジャンルの定義（labels.yaml）。"""
+    """店ジャンルと品目ジャンルの定義（labels.yaml）。
+
+    品目ジャンルは大分類→小分類の2段。item_categories は大分類ごとの小分類の一覧。
+    """
 
     store_genres: list[str]
-    item_genres: list[str]
+    item_categories: dict[str, list[str]]
+
+    @model_validator(mode="after")
+    def _unique_genres(self) -> "Labels":
+        # 小分類から大分類を一意に引けるように、小分類の名前は全体で重ならないようにする
+        if len(self.item_genres) != len(set(self.item_genres)):
+            raise ValueError("品目ジャンルの小分類の名前が重なっている")
+        return self
+
+    @property
+    def item_genres(self) -> list[str]:
+        """小分類の一覧（大分類の順）。"""
+        return [g for genres in self.item_categories.values() for g in genres]
+
+    def category_of(self, genre: str) -> str:
+        """小分類が属する大分類。"""
+        return next(c for c, genres in self.item_categories.items() if genre in genres)
 
 
 class GenreMap(BaseModel):

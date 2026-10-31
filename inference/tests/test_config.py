@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from receipt_app.config import AppConfig, load_config
+from receipt_app.config import AppConfig, Labels, load_config
 
 REPO_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 
@@ -29,9 +29,24 @@ def test_すべての店ジャンルに判定粒度が決まっている(config:
     assert set(config.genre_map.store_genre_to_granularity) == set(config.labels.store_genres)
 
 
-def test_品目ジャンルの見本がすべての品目ジャンルにある(config: AppConfig) -> None:
+def test_品目ジャンルの見本がすべての小分類にある(config: AppConfig) -> None:
     assert list(config.item_genre_examples) == config.labels.item_genres
     assert all(config.item_genre_examples.values())
+
+
+def test_小分類から大分類を引ける() -> None:
+    labels = Labels(
+        store_genres=[],
+        item_categories={"食材": ["肉", "魚介"], "飲み物": ["飲料"]},
+    )
+
+    assert labels.item_genres == ["肉", "魚介", "飲料"]
+    assert labels.category_of("魚介") == "食材"
+
+
+def test_小分類の名前が大分類をまたいで重なれば読み込みで弾く() -> None:
+    with pytest.raises(ValueError):
+        Labels(store_genres=[], item_categories={"食材": ["その他"], "食品以外": ["その他"]})
 
 
 def test_粒度の値がwholeかper_item以外なら読み込みで弾く(tmp_path: Path) -> None:

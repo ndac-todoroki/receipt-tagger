@@ -42,7 +42,10 @@ class FakeItemClassifier:
 
     def classify(self, names: list[str]) -> list[ItemGenreJudgement]:
         self.names.extend(names)
-        return [ItemGenreJudgement(genre="菓子", confidence=0.9, status="confirmed") for _ in names]
+        return [
+            ItemGenreJudgement(genre="菓子・スナック", confidence=0.9, status="confirmed")
+            for _ in names
+        ]
 
 
 def _receipt(store: str, *items: tuple[str, int], total: int) -> ParsedReceipt:
@@ -83,8 +86,18 @@ def test_品目ごとに判定する店では品目ジャンルを分類する()
     result, _, classifier = _run(receipt, {"サンプルマート": ["shop=convenience"]})
 
     assert result.granularity == "per_item"
-    assert result.items[0].genre == "菓子"
+    assert result.items[0].genre == "菓子・スナック"
     assert classifier.names == ["ポテチ"]
+
+
+def test_品目ジャンルの小分類に対応する大分類を返す() -> None:
+    receipt = _receipt("サンプルマート", ("ポテチ", 150), total=150)
+
+    result, _, _ = _run(receipt, {"サンプルマート": ["shop=convenience"]})
+
+    assert result.items[0].category == "菓子"
+    # 画面で小分類を選び直したときに大分類を引けるよう、対応表も返す
+    assert result.item_categories["菓子・スナック"] == "菓子"
 
 
 def test_全体で1ジャンルの店では品目を分類しない() -> None:
