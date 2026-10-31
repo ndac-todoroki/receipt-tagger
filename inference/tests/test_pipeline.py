@@ -168,3 +168,18 @@ def test_どの品目にも付かない値引きは品目ジャンルを分類�
     assert classifier.names == ["ポテチ"]
     assert result.items[1].genre is None
     assert result.consistency.ok is True
+
+
+def test_処理の段階を読み取り_店_品目の順に知らせる() -> None:
+    receipt = _receipt("サンプルマート", ("ポテチ", 150), total=150)
+    pipeline = Pipeline(
+        config=CONFIG,
+        reader=FakeReader(receipt),
+        search=FakeSearch({"サンプルマート": ["shop=convenience"]}),
+        item_classifier=FakeItemClassifier(),
+    )
+    stages: list[str] = []
+
+    pipeline.analyze(Image.new("RGB", (10, 10)), on_stage=stages.append)
+
+    assert stages == ["reading", "store", "items"]

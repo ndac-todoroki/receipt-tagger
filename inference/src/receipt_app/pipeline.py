@@ -5,6 +5,7 @@
 """
 
 import dataclasses
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -31,6 +32,8 @@ ReaderKind = Literal["vlm", "ocr"]
 # 品目ジャンルの分類器。embedding は埋め込みの類似度、
 # llm は読み取りと同じ LLM の制約付きデコーディング
 ItemClassifierKind = Literal["embedding", "llm"]
+# 解析の段階。画面で「今どこまで進んだか」を出すのに使う
+Stage = Literal["reading", "store", "items"]
 DEFAULT_VLM_URL = "http://localhost:30000/v1/chat/completions"
 
 # 店名の候補を検索する上限。Nominatim は1秒1回までなので、待ち時間を抑えるため絞る
@@ -85,11 +88,15 @@ class Pipeline:
             ),
         )
 
-    def analyze(self, image: Image.Image) -> AnalyzeResult:
-        """レシート画像を解析して結果を返す。"""
+    def analyze(
+        self, image: Image.Image, on_stage: Callable[[Stage], None] = lambda _: None
+    ) -> AnalyzeResult:
+        """レシート画像を解析して結果を返す。各段に入るたびに on_stage で段階を知らせる。"""
+        on_stage("reading")
         receipt = self._reader.read(image)
         receipt = dataclasses.replace(receipt, items=merge_discounts(fix_quantities(receipt.items)))
 
+        on_stage("store")
         store_name, store = self._judge_store(receipt.store_candidates)
         store = (
             store_genre_from_items([i.name for i in receipt.items], self._config.genre_map) or store
@@ -97,6 +104,7 @@ class Pipeline:
         granularity = decide_granularity(
             store.genre if store.status != "unknown" else None, self._config.genre_map
         )
+        on_stage("items")
         items = self._judge_items(receipt.items, per_item=granularity == "per_item")
         consistency = check_consistency(
             [i.amount for i in receipt.items],
