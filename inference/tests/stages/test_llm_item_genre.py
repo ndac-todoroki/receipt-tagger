@@ -1,7 +1,7 @@
 """LLM の制約付きデコーディングによる品目ジャンル分類（FR-11）のテスト。
 
 確かめること: 推論サーバーが選んだジャンルを返す、ジャンル名のトークンの確率を信頼度にする、
-            閾値未満を未確定にして候補を出す、
+            閾値未満を未確定にして候補を出す、同じ品名を何度か問い合わせて多数決で決める、
             推論サーバーに送る内容（ジャンルの enum、見本、品名）、
             通信の失敗や壊れた応答をその品目だけ判定不能にする。
 確かめないこと: LLM が正しく分類できるか（ml/scripts で実レシートの品名を使って測る）。
@@ -40,6 +40,8 @@ def _response(*value_tokens: object) -> object:
 
 
 class FakeServer:
+    """品名ごとに決まった応答を返す。応答をリストで渡すと、問い合わせのたびに順に返す。"""
+
     def __init__(self, responses: dict[str, object]) -> None:
         self.responses = responses
         self.bodies: list[dict[str, object]] = []
@@ -48,6 +50,8 @@ class FakeServer:
         self.bodies.append(body)
         name = body["messages"][-1]["content"].removeprefix("品名: ")  # type: ignore[index]
         response = self.responses[name]
+        if isinstance(response, list):
+            response = response.pop(0)
         if isinstance(response, Exception):
             raise response
         return response
@@ -99,13 +103,67 @@ def test_推論サーバーに出力をジャンルの選択肢に縛るよう�
 
     _classifier(server).classify(["鶏むね"])
 
-    (body,) = server.bodies
+    body = server.bodies[0]
     schema = body["response_format"]["json_schema"]["schema"]  # type: ignore[index]
     assert schema["properties"]["genre"]["enum"] == ["肉", "魚介", "菓子・スナック"]
     assert body["logprobs"] is True
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert "鶏もも肉" in body["messages"][0]["content"]  # type: ignore[index]
     assert body["messages"][-1]["content"] == "品名: 鶏むね"  # type: ignore[index]
+
+
+def test_同じ品名を3回問い合わせて多数決でジャンルを決める() -> None:
+    # 温度0でも GPU の計算の揺れで、問い合わせのたびに選ぶジャンルが変わることがある
+    server = FakeServer(
+        {
+            "ｻｹﾌﾚｰｸ": [
+                _response(_token("魚介", 0.6)),
+                _response(_token("肉", 0.7)),
+                _response(_token("魚介", 0.8)),
+            ]
+        }
+    )
+
+    (judgement,) = _classifier(server).classify(["ｻｹﾌﾚｰｸ"])
+
+    assert len(server.bodies) == 3
+    assert judgement.genre == "魚介"
+    assert judgement.candidates[:2] == ["魚介", "肉"]
+
+
+def test_多数決の信頼度は勝ったジャンルの確率を答えの返った票で平均したもの() -> None:
+    server = FakeServer(
+        {
+            "ｻｹﾌﾚｰｸ": [
+                _response(_token("魚介", 0.6)),
+                _response(_token("肉", 0.7)),
+                _response(_token("魚介", 0.9)),
+            ]
+        }
+    )
+
+    (judgement,) = _classifier(server).classify(["ｻｹﾌﾚｰｸ"])
+
+    assert math.isclose(judgement.confidence or 0, (0.6 + 0.9) / 3)
+    assert judgement.status == "confirmed"
+
+
+def test_票が割れて同数なら確率の合計が大きいジャンルにする() -> None:
+    server = FakeServer(
+        {"ｻｹ": [_response(_token("肉", 0.5)), _response(_token("魚介", 0.6)), TimeoutError()]}
+    )
+
+    (judgement,) = _classifier(server).classify(["ｻｹ"])
+
+    assert judgement.genre == "魚介"
+
+
+def test_一部の問い合わせに失敗しても残りの票で決める() -> None:
+    server = FakeServer({"鶏むね": [TimeoutError(), _response(_token("肉", 0.9)), TimeoutError()]})
+
+    (judgement,) = _classifier(server).classify(["鶏むね"])
+
+    assert (judgement.genre, judgement.status) == ("肉", "confirmed")
 
 
 def test_問い合わせに失敗した品目だけ判定不能にする() -> None:

@@ -3,14 +3,19 @@
 読み取りと同じ vLLM（Qwen3.6-35B-A3B）に品名を1つずつ送り、JSON スキーマの enum で
 ジャンルの選択肢以外を出せないようにする（制約付きデコーディング）。学習はしない。
 信頼度は、ジャンル名の部分のトークンの確率の積とする。
+
+温度0でも GPU の計算の揺れで、問い合わせのたびに選ぶジャンルが変わることがある
+（docs/devlog.md の 2026-11-01）。同じ品名を VOTES 回問い合わせて多数決で決める。
 """
 
 import json
 import logging
 import math
 import urllib.request
+from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Any
 
 from receipt_app.config import AppConfig
@@ -21,6 +26,7 @@ logger = logging.getLogger(__name__)
 TIMEOUT_SECONDS = 30.0
 # vLLM は同時に来た問い合わせをまとめて処理するので、品目ごとの問い合わせを並べて送る
 MAX_PARALLEL = 8
+VOTES = 3
 
 PROMPT = """レシートの品名を、次のジャンルから1つ選んで JSON で答えてください。
 品名は略されていたり半角カナだったりします。各ジャンルの後ろは品名の例です。
@@ -66,13 +72,43 @@ class LlmItemGenreClassifier:
         )
 
     def classify(self, names: list[str]) -> list[ItemGenreJudgement]:
-        """品名ごとに品目ジャンルを判定する。問い合わせに失敗した品目は判定不能にする。"""
+        """品名ごとに品目ジャンルを判定する。問い合わせがすべて失敗した品目は判定不能にする。"""
         if not names:
             return []
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
-            return list(pool.map(self._classify_one, names))
+            answers = list(pool.map(self._ask, [n for n in names for _ in range(VOTES)]))
+        return [self._vote(answers[i * VOTES : (i + 1) * VOTES]) for i in range(len(names))]
 
-    def _classify_one(self, name: str) -> ItemGenreJudgement:
+    def _vote(self, answers: list["_Answer | None"]) -> ItemGenreJudgement:
+        valid = [a for a in answers if a is not None]
+        if not valid:
+            return ItemGenreJudgement(genre=None, confidence=None, status="unknown")
+        votes: dict[str, list[float]] = defaultdict(list)
+        for a in valid:
+            votes[a.genre].append(a.confidence)
+        # 票の多い順。同数なら確率の合計が大きい方
+        ranked = sorted(votes, key=lambda g: (len(votes[g]), sum(votes[g])), reverse=True)
+        genre = ranked[0]
+        # 負けた票では勝ったジャンルの確率が分からないので0とみなし、答えの返った票で平均する
+        confidence = sum(votes[genre]) / len(valid)
+
+        candidates = list(ranked)
+        for a in valid:
+            if a.genre != genre:
+                continue
+            for prefix in a.alternatives:
+                candidates += [
+                    g for g in self._genres if g.startswith(prefix) and g not in candidates
+                ]
+        return ItemGenreJudgement(
+            genre=genre,
+            confidence=confidence,
+            status="confirmed" if confidence >= self._min_confidence else "uncertain",
+            candidates=candidates[:CANDIDATE_COUNT],
+        )
+
+    def _ask(self, name: str) -> "_Answer | None":
+        """1回問い合わせる。失敗や壊れた応答は None。"""
         body: dict[str, object] = {
             "model": self._model,
             "messages": [
@@ -108,17 +144,17 @@ class LlmItemGenreClassifier:
         except Exception as e:
             # 品名はレシートの内容なのでログに出さない
             logger.warning("品目ジャンルの問い合わせに失敗: %s", type(e).__name__)
-            return ItemGenreJudgement(genre=None, confidence=None, status="unknown")
+            return None
+        return _Answer(genre=genre, confidence=confidence, alternatives=alternatives)
 
-        candidates = [genre]
-        for prefix in alternatives:
-            candidates += [g for g in self._genres if g.startswith(prefix) and g not in candidates]
-        return ItemGenreJudgement(
-            genre=genre,
-            confidence=confidence,
-            status="confirmed" if confidence >= self._min_confidence else "uncertain",
-            candidates=candidates[:CANDIDATE_COUNT],
-        )
+
+@dataclass(frozen=True)
+class _Answer:
+    """1回の問い合わせの答え。alternatives はジャンル名の最初のトークンの代わりの候補。"""
+
+    genre: str
+    confidence: float
+    alternatives: list[str]
 
 
 def _value_probability(
