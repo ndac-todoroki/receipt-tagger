@@ -17,6 +17,11 @@ services:
     # 「読み取れませんでした」になる
     depends_on:
       - vllm
+    # 権限の昇格と、使わない特権を禁じる（8000番は特権の要らないポート）
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   # 読み取り用の視覚言語モデル（Qwen3.6-35B-A3B の NVFP4 版）を配信する。外部には公開しない

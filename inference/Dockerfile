@@ -22,5 +22,9 @@ COPY --from=frontend /frontend/dist /app/static
 COPY config /app/config
 # モデルの重みはイメージに焼かず、/models のボリュームに初回起動時にダウンロードする
 ENV STATIC_DIR=/app/static CONFIG_DIR=/app/config MODEL_DIR=/models HF_HOME=/models/hf     PATH=/opt/venv/bin:$PATH
+# 万一アプリに穴があっても被害を広げないよう、root 以外で動かす。
+# /models はボリュームの初期の持ち主になるよう、先に作って持ち主を変えておく
+RUN useradd --system --uid 10001 --no-create-home app     && mkdir -p /models && chown app /models
+USER app
 EXPOSE 8000
 CMD ["uvicorn", "receipt_app.main:app", "--host", "0.0.0.0", "--port", "8000"]
