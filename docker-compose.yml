@@ -10,7 +10,7 @@ services:
       # 読み取りは下の vllm に任せる。compose 内部のネットワークだけで通信する
       - VLM_URL=http://vllm:8000/v1/chat/completions
       # 品目ジャンルの分類器（embedding / llm）。比べた結果は docs/evaluation.md
-      - ITEM_CLASSIFIER=${ITEM_CLASSIFIER:-embedding}
+      - ITEM_CLASSIFIER=${ITEM_CLASSIFIER:-llm}
     volumes:
       - models:/models
     # vllm の起動（モデルの読み込みに数分かかる）は待たない。準備が済むまでの読み取りは

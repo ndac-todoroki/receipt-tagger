@@ -71,7 +71,7 @@ class Pipeline:
         model_dir: Path | None = None,
         reader: ReaderKind = "vlm",
         vlm_url: str = DEFAULT_VLM_URL,
-        item_classifier: ItemClassifierKind = "embedding",
+        item_classifier: ItemClassifierKind = "llm",
     ) -> "Pipeline":
         """本物のモデルを読み込んだパイプラインを作る。起動時に1回だけ呼ぶ。"""
         return cls(

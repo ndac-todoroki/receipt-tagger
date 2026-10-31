@@ -31,7 +31,7 @@ def _load_pipeline() -> Analyzer:
     reader = os.environ.get("RECEIPT_READER", "vlm")
     if reader not in get_args(ReaderKind):
         raise ValueError(f"RECEIPT_READER は vlm か ocr: {reader}")
-    item_classifier = os.environ.get("ITEM_CLASSIFIER", "embedding")
+    item_classifier = os.environ.get("ITEM_CLASSIFIER", "llm")
     if item_classifier not in get_args(ItemClassifierKind):
         raise ValueError(f"ITEM_CLASSIFIER は embedding か llm: {item_classifier}")
     pipeline = Pipeline.load(
