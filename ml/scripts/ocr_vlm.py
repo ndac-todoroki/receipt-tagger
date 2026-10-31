@@ -35,6 +35,7 @@ STRUCT_PROMPT = """このレシート画像から、次の項目を読み取っ�
 - store_name: 店名（読めなければ null）
 - items: 購入した品目。name は品名、quantity は個数、unit_price は単価、amount はその行の金額。
   値引き・割引の行も品目として含め、amount を負の数にする。個数・単価が書かれていなければ null
+  品名や金額のそばにある税区分の印（外8、軽8、※、10% など）は個数ではないので quantity に入れない
 - subtotal: 小計（無ければ null）
 - tax: 外税の額（税抜きの品目に合計で加算される消費税。内税のみなら null）
 - total: 合計金額（支払った金額ではなく合計。読めなければ null）
