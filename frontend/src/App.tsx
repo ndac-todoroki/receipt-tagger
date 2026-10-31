@@ -124,6 +124,48 @@ export default function App() {
   const timer = setInterval(() => setNow(Date.now()), 500)
   onCleanup(() => clearInterval(timer))
 
+  // ページのどこにドロップしてもよい。子要素の上を通るたびに dragenter / dragleave が
+  // 対で起きるので、回数を数えてページの外に出たかを判断する
+  const [dragging, setDragging] = createSignal(false)
+  let dragDepth = 0
+  const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false
+  const onDragEnter = (e: DragEvent) => {
+    if (!hasFiles(e)) return
+    dragDepth += 1
+    setDragging(true)
+  }
+  const onDragLeave = (e: DragEvent) => {
+    if (!hasFiles(e)) return
+    dragDepth = Math.max(0, dragDepth - 1)
+    if (dragDepth === 0) setDragging(false)
+  }
+  const onDragOver = (e: DragEvent) => {
+    if (!hasFiles(e)) return
+    // 既定の動作（ブラウザが画像を開く）を止めて、ドロップを受け付ける
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = loading() ? 'none' : 'copy'
+  }
+  const onDrop = (e: DragEvent) => {
+    if (!hasFiles(e)) return
+    e.preventDefault()
+    dragDepth = 0
+    setDragging(false)
+    const f = [...(e.dataTransfer?.files ?? [])].find((file) => file.type.startsWith('image/'))
+    if (loading()) return
+    if (f) void start(f)
+    else setError('画像のファイルをドロップしてください')
+  }
+  window.addEventListener('dragenter', onDragEnter)
+  window.addEventListener('dragleave', onDragLeave)
+  window.addEventListener('dragover', onDragOver)
+  window.addEventListener('drop', onDrop)
+  onCleanup(() => {
+    window.removeEventListener('dragenter', onDragEnter)
+    window.removeEventListener('dragleave', onDragLeave)
+    window.removeEventListener('dragover', onDragOver)
+    window.removeEventListener('drop', onDrop)
+  })
+
   const start = async (file: File) => {
     const old = imageUrl()
     if (old) URL.revokeObjectURL(old)
@@ -156,23 +198,37 @@ export default function App() {
   return (
     <main>
       <h1>レシート仕分け</h1>
-      <div class="card">
-        <label class="upload">
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            disabled={loading()}
-            onChange={(e) => {
-              const f = e.currentTarget.files?.[0]
-              // 同じファイルを選び直しても onChange が起きるよう、値を空に戻す
-              e.currentTarget.value = ''
-              if (f) void start(f)
-            }}
-          />
-          <span class="muted">画像を選ぶと、すぐに解析を始めます</span>
-        </label>
-      </div>
+      {/* ブラウザ標準のボタンは見た目が合わないので、input は見えなくしてエリア全体で選ばせる */}
+      <label classList={{ dropzone: true, dragging: dragging(), disabled: loading() }}>
+        <input
+          class="visually-hidden"
+          type="file"
+          accept="image/*"
+          capture="environment"
+          disabled={loading()}
+          onChange={(e) => {
+            const f = e.currentTarget.files?.[0]
+            // 同じファイルを選び直しても onChange が起きるよう、値を空に戻す
+            e.currentTarget.value = ''
+            if (f) void start(f)
+          }}
+        />
+        <Show
+          when={dragging()}
+          fallback={
+            <>
+              <strong>{loading() ? '解析中です' : 'レシートの画像を選ぶ'}</strong>
+              <span class="muted">
+                {loading()
+                  ? '終わると次の画像を選べます'
+                  : 'クリックして選ぶか、ページのどこかにドラッグ＆ドロップ。すぐに解析を始めます'}
+              </span>
+            </>
+          }
+        >
+          <strong>{loading() ? '解析中は受け付けられません' : 'ドロップして解析開始'}</strong>
+        </Show>
+      </label>
 
       <Show when={imageUrl()}>
         <div class="panes">
