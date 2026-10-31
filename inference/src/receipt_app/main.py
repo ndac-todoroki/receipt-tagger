@@ -1,6 +1,8 @@
 """FastAPIアプリ。APIと、Solid.jsのビルド成果物の静的配信を担う。"""
 
 import io
+import json
+import logging
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -8,10 +10,11 @@ from pathlib import Path
 from typing import get_args
 
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from receipt_app.analysis_queue import AnalysisQueue, QueueEvent
 from receipt_app.config import load_config
 from receipt_app.schemas import AnalyzeResult
 from receipt_app.stages.receipt import ReadError
@@ -19,7 +22,12 @@ from receipt_app.stages.receipt import ReadError
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 REPO_CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
 
-Analyzer = Callable[[Image.Image], AnalyzeResult]
+logger = logging.getLogger(__name__)
+
+READ_ERROR_DETAIL = "レシートを読み取れませんでした。時間をおいて試してください"
+
+# 画像と、解析の段階を知らせる関数を受け取って解析する
+Analyzer = Callable[[Image.Image, Callable[[str], None]], AnalyzeResult]
 
 
 def _load_pipeline() -> Analyzer:
@@ -60,13 +68,14 @@ def create_app(
         yield
 
     app = FastAPI(title="receipt-tagger", lifespan=lifespan)
+    queue = AnalysisQueue()
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.post("/api/analyze")
-    async def analyze(image: UploadFile) -> AnalyzeResult:
+    async def analyze(image: UploadFile) -> StreamingResponse:
         # 上限+1バイトだけ読めば超過を判定でき、巨大ファイルを丸ごとメモリに載せずに済む
         data = await image.read(max_upload_bytes + 1)
         if len(data) > max_upload_bytes:
@@ -78,19 +87,47 @@ def create_app(
             raise HTTPException(status_code=415, detail="画像として読み込めません") from e
         # スマホの写真は向きがEXIFに入っているので、画素を正しい向きに直してから読む
         upright = ImageOps.exif_transpose(img).convert("RGB")
-        # 画像はディスクに保存せず、メモリ上で処理して破棄する。
-        # 読み取りは推論サーバーの応答を数秒待つので、イベントループを止めないよう別スレッドで動かす
-        try:
-            return await run_in_threadpool(state["analyze"], upright)
-        except ReadError as e:
-            raise HTTPException(
-                status_code=502, detail="レシートを読み取れませんでした。時間をおいて試してください"
-            ) from e
+        # 画像はディスクに保存せず、メモリ上で処理して破棄する
+        events = queue.run(lambda on_stage: state["analyze"](upright, on_stage))
+        return StreamingResponse(
+            _ndjson(events),
+            media_type="application/x-ndjson",
+            # 途中の中継（Cloudflare など）でまとめて送られると、進み具合がすぐ届かない
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     if static_dir is not None and static_dir.is_dir():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
     return app
+
+
+def _json_line(obj: dict[str, object]) -> str:
+    return json.dumps(obj, ensure_ascii=False) + "\n"
+
+
+async def _ndjson(events: AsyncIterator[QueueEvent]) -> AsyncIterator[str]:
+    """キューのイベントを、1行1つの JSON にして送る。"""
+    try:
+        async for e in events:
+            if e.kind == "done":
+                line: dict[str, object] = {"type": "result", "result": e.result.model_dump()}
+            else:
+                line = {"type": e.kind}
+                if e.ahead is not None:
+                    line["ahead"] = e.ahead
+                if e.stage is not None:
+                    line["stage"] = e.stage
+                if e.estimate_seconds is not None:
+                    line["estimate_seconds"] = round(e.estimate_seconds, 1)
+            yield _json_line(line)
+    except ReadError:
+        # 進み具合を送り始めた後なので、HTTP の状態コードではなく最後の行で伝える
+        yield _json_line({"type": "error", "detail": READ_ERROR_DETAIL})
+    except Exception as e:
+        # レシートの内容が含まれうるので、例外の中身はログに出さない
+        logger.error("解析に失敗: %s", type(e).__name__)
+        yield _json_line({"type": "error", "detail": "解析に失敗しました"})
 
 
 def _static_dir_from_env() -> Path | None:
