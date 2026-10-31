@@ -55,10 +55,12 @@ services:
       start_period: 600s
     restart: unless-stopped
 
-  # 公開用。Cloudflare Zero Trust で作ったトンネルのトークンを .env に置いて
-  # `docker compose --profile tunnel up -d` で起動する
+  # 公開用。Cloudflare Zero Trust で作ったトンネルのトークンを .env に置き、
+  # .env の COMPOSE_PROFILES=tunnel で起動する（デプロイの hook でも一緒に起動される）。
+  # トンネルの公開ホスト名の転送先は http://app:8000
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    # latest だと再ビルドのたびに版が変わりうるので固定する
+    image: cloudflare/cloudflared:2026.10.1
     command: tunnel --no-autoupdate run
     environment:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}

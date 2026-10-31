@@ -9,6 +9,12 @@
 - 利用規約: https://operations.osmfoundation.org/policies/nominatim/
 - 著作権表記: https://www.openstreetmap.org/copyright
 
+## 公開
+
+| 名称 | 用途 | ライセンス・利用条件 | 必要な表記 |
+|---|---|---|---|
+| Cloudflare Tunnel（`cloudflare/cloudflared:2026.10.1`、無料プラン） | DGX Spark 上のアプリを `receipt.otobako.app` で公開する | cloudflared は Apache-2.0。サービスは Cloudflare の利用規約に従う。アップロード画像は Cloudflare を経由する（TLS は Cloudflare で終端される） | ― |
+
 ## モデル・推論サーバー
 
 | 名称 | 用途 | ライセンス・利用条件 | 必要な表記 |
