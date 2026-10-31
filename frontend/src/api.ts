@@ -14,6 +14,8 @@ export type ItemResult = {
   quantity: number
   unit_price: number | null
   amount: number
+  // その品目に付いた割引の額。amount は割引を引いた後の金額
+  discount: number
   genre: string | null
   confidence: number | null
   status: JudgeStatus

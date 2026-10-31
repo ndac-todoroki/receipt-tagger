@@ -24,6 +24,8 @@ class ItemResult(BaseModel):
     quantity: int
     unit_price: int | None
     amount: int
+    # その品目に付いた割引の額（正の数）。amount は割引を引いた後の金額
+    discount: int = 0
     genre: str | None
     confidence: float | None
     status: JudgeStatus

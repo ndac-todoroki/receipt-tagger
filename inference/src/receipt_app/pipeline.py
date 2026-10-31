@@ -4,6 +4,7 @@
 → 判定粒度の決定 → 品目ジャンル分類 → 整合性チェック
 """
 
+import dataclasses
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -13,6 +14,7 @@ from receipt_app.config import AppConfig
 from receipt_app.schemas import AnalyzeResult, ItemResult, StoreResult
 from receipt_app.search import NominatimClient
 from receipt_app.stages.consistency import check_consistency
+from receipt_app.stages.item_cleanup import fix_quantities, merge_discounts
 from receipt_app.stages.item_genre import EmbeddingItemGenreClassifier, ItemGenreJudgement
 from receipt_app.stages.receipt import ParsedItem, ParsedReceipt
 from receipt_app.stages.store_genre import (
@@ -76,6 +78,7 @@ class Pipeline:
     def analyze(self, image: Image.Image) -> AnalyzeResult:
         """レシート画像を解析して結果を返す。"""
         receipt = self._reader.read(image)
+        receipt = dataclasses.replace(receipt, items=merge_discounts(fix_quantities(receipt.items)))
 
         store_name, store = self._judge_store(receipt.store_candidates)
         granularity = decide_granularity(
@@ -116,7 +119,7 @@ class Pipeline:
 
     def _judge_items(self, items: list[ParsedItem], per_item: bool) -> list[ItemResult]:
         # 値引きは品物ではないので分類しない
-        targets = [i for i in items if per_item and i.amount > 0]
+        targets = [i for i in items if per_item and i.amount + i.discount > 0]
         judged = dict(
             zip(
                 map(id, targets),
@@ -133,6 +136,7 @@ class Pipeline:
                     quantity=item.quantity,
                     unit_price=item.unit_price,
                     amount=item.amount,
+                    discount=item.discount,
                     genre=j.genre if j else None,
                     confidence=j.confidence if j else None,
                     status=j.status if j else "confirmed",

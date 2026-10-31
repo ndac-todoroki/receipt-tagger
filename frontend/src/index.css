@@ -68,6 +68,12 @@ td.num {
   font-variant-numeric: tabular-nums;
 }
 
+td.num .discount {
+  display: block;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
 .muted {
   color: var(--muted);
 }

@@ -1,7 +1,7 @@
 """各段を組み立てたパイプラインのテスト。
 
 確かめること: 段のつなぎ方（店名の候補を順に検索する、判定粒度で品目の分類を切り替える、
-            検索の失敗を判定不能にする、値引きを分類しない）。
+            検索の失敗を判定不能にする、品目の後処理をかける、値引きを分類しない）。
 確かめないこと: 各段の中身（段ごとのテストで扱う）。読み取り・検索・分類器は偽物を使う。
 """
 
@@ -105,8 +105,30 @@ def test_検索に失敗したら店ジャンルは判定不能にして品目�
     assert result.granularity == "per_item"
 
 
-def test_値引きの行は品目ジャンルを分類しない() -> None:
+def test_品目の直後の割引は品目にまとめて合計の整合性を保つ() -> None:
     receipt = _receipt("サンプルマート", ("ポテチ", 150), ("値引", -20), total=130)
+
+    result, _, classifier = _run(receipt, {"サンプルマート": ["shop=convenience"]})
+
+    assert [(i.name, i.amount, i.discount) for i in result.items] == [("ポテチ", 130, 20)]
+    assert classifier.names == ["ポテチ"]
+    assert result.consistency.ok is True
+
+
+def test_合わない個数は1に戻す() -> None:
+    receipt = ParsedReceipt(
+        store_candidates=["サンプルマート"],
+        items=[ParsedItem(name="ポテチ", amount=150, quantity=8)],
+        total=150,
+    )
+
+    result, _, _ = _run(receipt, {"サンプルマート": ["shop=convenience"]})
+
+    assert result.items[0].quantity == 1
+
+
+def test_どの品目にも付かない値引きは品目ジャンルを分類しない() -> None:
+    receipt = _receipt("サンプルマート", ("ポテチ", 150), ("小計値引", -20), total=130)
 
     result, _, classifier = _run(receipt, {"サンプルマート": ["shop=convenience"]})
 

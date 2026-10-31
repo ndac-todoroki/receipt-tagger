@@ -113,7 +113,12 @@ export default function App() {
                       <tr>
                         <td>{item.name}</td>
                         <td class="num">{item.quantity}</td>
-                        <td class="num">{yen(item.amount)}</td>
+                        <td class="num">
+                          {yen(item.amount)}
+                          <Show when={item.discount > 0}>
+                            <span class="discount">（割引 {yen(item.discount)}）</span>
+                          </Show>
+                        </td>
                         <Show when={r().granularity === 'per_item'}>
                           <td>
                             <GenreCell
