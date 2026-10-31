@@ -204,7 +204,6 @@ export default function App() {
           class="visually-hidden"
           type="file"
           accept="image/*"
-          capture="environment"
           disabled={loading()}
           onChange={(e) => {
             const f = e.currentTarget.files?.[0]
