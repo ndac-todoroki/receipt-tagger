@@ -1,14 +1,18 @@
 """店ジャンル判定（FR-09）と判定粒度の決定（FR-10）のテスト。
 
 確かめること: 検索で得た複数のOSM店種別タグを店ジャンルに変換し、多数決で1つに決める。
-            店ジャンルから粒度を決める。
+            店ジャンルから粒度を決める。品名に決め手の語があれば、検索より優先して店ジャンルを決める。
 確かめないこと: OSMへの問い合わせ（検索クライアントのテストで扱う）。
 """
 
 import pytest
 
 from receipt_app.config import GenreMap
-from receipt_app.stages.store_genre import decide_granularity, judge_store_genre
+from receipt_app.stages.store_genre import (
+    decide_granularity,
+    judge_store_genre,
+    store_genre_from_items,
+)
 
 GENRE_MAP = GenreMap(
     osm_tag_to_store_genre={
@@ -23,6 +27,7 @@ GENRE_MAP = GenreMap(
         "飲食店": "whole",
         "その他": "per_item",
     },
+    item_keyword_to_store_genre={"調剤": "医療"},
 )
 
 
@@ -68,3 +73,15 @@ def test_店ジャンルに応じた粒度を返す() -> None:
 
 def test_店ジャンルが判定不能なら品目ごとに判定する() -> None:
     assert decide_granularity(None, GENRE_MAP) == "per_item"
+
+
+def test_品名に決め手の語を含む行があればその店ジャンルに確定する() -> None:
+    # 調剤薬局とドラッグストアは OSM の店種別では見分けられない
+    judged = store_genre_from_items(["調剤基本料1", "薬剤料"], GENRE_MAP)
+
+    assert judged is not None
+    assert (judged.genre, judged.status) == ("医療", "confirmed")
+
+
+def test_品名に決め手の語が無ければ決めない() -> None:
+    assert store_genre_from_items(["かぜ薬", "目薬"], GENRE_MAP) is None

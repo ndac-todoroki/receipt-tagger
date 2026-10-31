@@ -40,6 +40,21 @@ def judge_store_genre(
     )
 
 
+def store_genre_from_items(
+    item_names: list[str], genre_map: GenreMap
+) -> StoreGenreJudgement | None:
+    """品名に決め手の語（例: 調剤）を含む行があれば、その語の店ジャンルに確定する。
+
+    無ければ None。
+    """
+    for keyword, genre in genre_map.item_keyword_to_store_genre.items():
+        if any(keyword in name for name in item_names):
+            return StoreGenreJudgement(
+                genre=genre, confidence=1.0, status="confirmed", candidates=[genre]
+            )
+    return None
+
+
 def decide_granularity(store_genre: str | None, genre_map: GenreMap) -> Granularity:
     """店ジャンルから、全体で1ジャンルにするか品目ごとに判定するかを決める。"""
     if store_genre is None:

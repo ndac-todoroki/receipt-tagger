@@ -22,6 +22,7 @@ from receipt_app.stages.store_genre import (
     StoreGenreJudgement,
     decide_granularity,
     judge_store_genre,
+    store_genre_from_items,
 )
 from receipt_app.stages.vlm_reader import VlmReceiptReader
 
@@ -90,6 +91,9 @@ class Pipeline:
         receipt = dataclasses.replace(receipt, items=merge_discounts(fix_quantities(receipt.items)))
 
         store_name, store = self._judge_store(receipt.store_candidates)
+        store = (
+            store_genre_from_items([i.name for i in receipt.items], self._config.genre_map) or store
+        )
         granularity = decide_granularity(
             store.genre if store.status != "unknown" else None, self._config.genre_map
         )

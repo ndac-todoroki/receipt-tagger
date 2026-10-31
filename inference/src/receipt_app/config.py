@@ -40,6 +40,8 @@ class GenreMap(BaseModel):
 
     osm_tag_to_store_genre: dict[str, str]
     store_genre_to_granularity: dict[str, Granularity]
+    # 品名に含まれる語→店ジャンル。検索の結果より優先する
+    item_keyword_to_store_genre: dict[str, str] = {}
 
 
 class Thresholds(BaseModel):

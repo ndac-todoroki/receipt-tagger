@@ -31,6 +31,11 @@ osm_tag_to_store_genre:
   shop=electronics: 衣類・家電
   shop=computer: 衣類・家電
 
+# 品名に含まれる語 → 店ジャンル。品名にこの語を含む行があれば、検索の結果より優先する
+# 調剤薬局はドラッグストアと同じ amenity=pharmacy で登録されていて、店の種別では見分けられない
+item_keyword_to_store_genre:
+  調剤: 医療
+
 # 店ジャンル → 判定粒度（docs/requirements.md §8.3）
 #   whole: レシート全体で1ジャンル / per_item: 品目ごとに判定
 # 店ジャンルが判定不能のときは per_item とする

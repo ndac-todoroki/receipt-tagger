@@ -25,6 +25,13 @@ def test_OSMタグの対応先はすべて定義済みの店ジャンル(config:
     assert unknown == set()
 
 
+def test_品名の語の対応先はすべて定義済みの店ジャンル(config: AppConfig) -> None:
+    unknown = set(config.genre_map.item_keyword_to_store_genre.values()) - set(
+        config.labels.store_genres
+    )
+    assert unknown == set()
+
+
 def test_すべての店ジャンルに判定粒度が決まっている(config: AppConfig) -> None:
     assert set(config.genre_map.store_genre_to_granularity) == set(config.labels.store_genres)
 

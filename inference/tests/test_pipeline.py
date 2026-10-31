@@ -109,6 +109,17 @@ def test_全体で1ジャンルの店では品目を分類しない() -> None:
     assert classifier.names == []
 
 
+def test_品名から店ジャンルが決まる店は検索の結果より品名を優先する() -> None:
+    receipt = _receipt("サンプル薬局", ("調剤基本料", 450), ("薬剤料", 300), total=750)
+
+    result, _, classifier = _run(receipt, {"サンプル薬局": ["amenity=pharmacy"]})
+
+    assert result.store.name == "サンプル薬局"
+    assert result.store.genre == "医療"
+    assert result.granularity == "whole"
+    assert classifier.names == []
+
+
 def test_検索に失敗したら店ジャンルは判定不能にして品目ごとに判定する() -> None:
     receipt = _receipt("サンプルマート", ("ポテチ", 150), total=150)
 
