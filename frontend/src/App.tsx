@@ -4,6 +4,9 @@ import { analyze, type AnalyzeResult, type JudgeStatus, type Progress, type Stag
 
 const yen = (n: number | null) => (n === null ? '—' : `¥${n.toLocaleString()}`)
 
+// index.css の --cat-0 〜 --cat-5
+const CATEGORY_COLORS = 6
+
 const STAGES: { stage: Stage; label: string }[] = [
   { stage: 'reading', label: '文字の読み取り' },
   { stage: 'store', label: '店の検索' },
@@ -210,6 +213,13 @@ function ResultCards(props: {
 }) {
   const r = () => props.result
   const setResult = props.setResult
+  const perItem = () => r().granularity === 'per_item'
+  // 大分類の色は、設定（labels.yaml）での大分類の並び順で決める
+  const categories = () => [...new Set(Object.values(r().item_categories))]
+  const categoryColor = (category: string | null) => {
+    const i = category === null ? -1 : categories().indexOf(category)
+    return i < 0 ? 'var(--border)' : `var(--cat-${i % CATEGORY_COLORS})`
+  }
   return (
     <>
       <div class="card">
@@ -233,56 +243,56 @@ function ResultCards(props: {
       </Show>
 
       <div class="card">
-        <table>
-          <thead>
-            <tr>
-              <th>品目</th>
-              <th class="num">数量</th>
-              <th class="num">金額</th>
-              <Show when={r().granularity === 'per_item'}>
-                <th>大分類</th>
-                <th>ジャンル</th>
-              </Show>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={r().items}>
-              {(item, i) => (
-                <tr>
-                  <td>{item.name}</td>
-                  <td class="num">{item.quantity}</td>
-                  <td class="num">
-                    {yen(item.amount)}
-                    <Show when={item.discount > 0}>
-                      <span class="discount">（割引 {yen(item.discount)}）</span>
-                    </Show>
-                  </td>
-                  <Show when={r().granularity === 'per_item'}>
-                    <td>{item.category ?? <span class="muted">—</span>}</td>
-                    <td>
-                      <GenreCell
-                        {...item}
-                        onChoose={(g) =>
-                          setResult('value', 'items', i(), {
-                            genre: g,
-                            category: r().item_categories[g] ?? null,
-                            status: 'confirmed',
-                          })
-                        }
-                      />
-                    </td>
+        <div classList={{ items: true, 'per-item': perItem() }} role="table">
+          <div class="item-row head" role="row">
+            <span class="name" role="columnheader">品目</span>
+            <span class="qty" role="columnheader">数量</span>
+            <span class="amount" role="columnheader">金額</span>
+            <Show when={perItem()}>
+              <span class="category" role="columnheader">大分類</span>
+              <span class="genre" role="columnheader">ジャンル</span>
+            </Show>
+          </div>
+          <For each={r().items}>
+            {(item, i) => (
+              <div
+                class="item-row"
+                role="row"
+                style={{ '--cat': categoryColor(item.category) }}
+              >
+                <span class="name" role="cell">{item.name}</span>
+                <span class="qty" role="cell">{item.quantity}</span>
+                <span class="amount" role="cell">
+                  {yen(item.amount)}
+                  <Show when={item.discount > 0}>
+                    <span class="discount">（割引 {yen(item.discount)}）</span>
                   </Show>
-                </tr>
-              )}
-            </For>
-          </tbody>
-          <tfoot>
-            <tr>
-              <th colspan="2">合計</th>
-              <td class="num">{yen(r().total)}</td>
-            </tr>
-          </tfoot>
-        </table>
+                </span>
+                <Show when={perItem()}>
+                  <span class="category" role="cell">
+                    {item.category ?? <span class="muted">—</span>}
+                  </span>
+                  <span class="genre" role="cell">
+                    <GenreCell
+                      {...item}
+                      onChoose={(g) =>
+                        setResult('value', 'items', i(), {
+                          genre: g,
+                          category: r().item_categories[g] ?? null,
+                          status: 'confirmed',
+                        })
+                      }
+                    />
+                  </span>
+                </Show>
+              </div>
+            )}
+          </For>
+          <div class="item-row total" role="row">
+            <span class="name" role="rowheader">合計</span>
+            <span class="amount" role="cell">{yen(r().total)}</span>
+          </div>
+        </div>
       </div>
     </>
   )

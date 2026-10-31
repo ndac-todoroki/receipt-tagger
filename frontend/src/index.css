@@ -8,6 +8,13 @@
   --warn: #9a6700;
   --warn-bg: #fff8c5;
   --error: #cf222e;
+  /* 大分類の色（並び順: 惣菜・弁当 / 菓子 / 食材 / 飲み物 / その他の食品 / 食品以外） */
+  --cat-0: #d1700a;
+  --cat-1: #d1427f;
+  --cat-2: #1f8f3a;
+  --cat-3: #2563eb;
+  --cat-4: #0f8a80;
+  --cat-5: #6e7781;
 
   font: 16px/1.6 system-ui, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   color-scheme: light dark;
@@ -26,6 +33,12 @@
     --warn: #d29922;
     --warn-bg: #272115;
     --error: #f85149;
+    --cat-0: #f0883e;
+    --cat-1: #f778ba;
+    --cat-2: #3fb950;
+    --cat-3: #58a6ff;
+    --cat-4: #39c5bb;
+    --cat-5: #8d96a0;
   }
 }
 
@@ -49,30 +62,6 @@ h1 {
   border-radius: 8px;
   padding: 12px 16px;
   margin: 12px 0;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  text-align: left;
-  padding: 6px 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-th.num,
-td.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-td.num .discount {
-  display: block;
-  font-size: 0.8em;
-  color: var(--muted);
 }
 
 .muted {
@@ -232,6 +221,103 @@ button:disabled {
 
   .bar > div.current {
     animation: none;
+  }
+}
+
+/* 品目は1行1枚のカード。列は grid でそろえ、広い画面では表と同じ並びにする */
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3em 7em;
+  grid-template-areas: 'name qty amount';
+  gap: 0 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-left: 4px solid var(--cat, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cat, var(--border)) 10%, var(--bg));
+}
+
+.per-item .item-row {
+  grid-template-columns: minmax(0, 3fr) 3em 7em minmax(0, 1.4fr) minmax(0, 2fr);
+  grid-template-areas: 'name qty amount category genre';
+}
+
+.item-row.head,
+.item-row.total {
+  border-left-color: transparent;
+  background: none;
+  font-weight: bold;
+}
+
+.item-row.total {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.item-row .name {
+  grid-area: name;
+  overflow-wrap: anywhere;
+}
+
+.item-row .qty {
+  grid-area: qty;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.item-row .amount {
+  grid-area: amount;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.item-row .amount .discount {
+  display: block;
+  font-size: 0.8em;
+  font-weight: normal;
+  color: var(--muted);
+}
+
+.item-row .category {
+  grid-area: category;
+}
+
+.item-row .genre {
+  grid-area: genre;
+}
+
+.item-row select {
+  max-width: 100%;
+}
+
+/* 狭い画面では1枚のカードの中で2段に折り返す */
+@media (max-width: 600px) {
+  .per-item .item-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name name amount'
+      'category genre qty';
+  }
+
+  .item-row.head {
+    display: none;
+  }
+
+  .per-item .item-row .category,
+  .per-item .item-row .genre,
+  .per-item .item-row .qty {
+    font-size: 0.85em;
+    color: var(--muted);
+  }
+
+  .per-item .item-row .qty::before {
+    content: '×';
   }
 }
 
