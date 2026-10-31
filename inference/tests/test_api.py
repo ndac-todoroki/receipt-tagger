@@ -1,7 +1,8 @@
 """推論APIの入出力の約束事を確かめるテスト。
 
 確かめること: 画像を受け取り、進み具合と結果を1行1つの JSON（NDJSON）で順に返す、
-            不正な入力を弾く、読み取りの失敗を伝える。
+            不正な入力を弾く、読み取りの失敗を伝える、
+            同じ相手からの依頼が多すぎれば断る、待ち行列が上限なら断る。
 確かめないこと: 各段の判定の正しさ（段ごとのテストで扱う）。待ち順の数え方（キューのテストで扱う）。
 """
 
@@ -13,6 +14,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from receipt_app.analysis_queue import AnalysisQueue
 from receipt_app.main import create_app
 from receipt_app.schemas import AnalyzeResult, ConsistencyResult, StoreResult
 from receipt_app.stages.receipt import ReadError
@@ -47,9 +49,24 @@ def _failing_analyzer(image: Image.Image, on_stage: Callable[[str], None]) -> An
 def _client(
     max_upload_bytes: int = 10_000_000,
     analyzer: Analyzer | None = None,
+    rate_limits: list[tuple[float, int]] | None = None,
+    queue: AnalysisQueue | None = None,
 ) -> TestClient:
-    app = create_app(analyzer=analyzer or _fake_analyzer, max_upload_bytes=max_upload_bytes)
+    app = create_app(
+        analyzer=analyzer or _fake_analyzer,
+        max_upload_bytes=max_upload_bytes,
+        rate_limits=rate_limits or [(60, 100)],
+        queue=queue,
+    )
     return TestClient(app)
+
+
+def _post(client: TestClient, headers: dict[str, str] | None = None) -> Any:
+    return client.post(
+        "/api/analyze",
+        files={"image": ("r.png", _png_bytes(), "image/png")},
+        headers=headers or {},
+    )
 
 
 def test_ヘルスチェックはokを返す() -> None:
@@ -99,3 +116,35 @@ def test_レシートを読み取れなければ最後の行で理由を返す()
         "type": "error",
         "detail": "レシートを読み取れませんでした。時間をおいて試してください",
     }
+
+
+def test_同じ相手からの依頼が多すぎれば429で断る() -> None:
+    client = _client(rate_limits=[(60, 1)])
+
+    assert _post(client).status_code == 200
+    res = _post(client)
+
+    assert res.status_code == 429
+    assert "時間をおいて" in res.json()["detail"]
+
+
+def test_Cloudflare経由では接続元のIPアドレスで相手を見分ける() -> None:
+    # Cloudflare Tunnel 経由だと、接続してくるのはすべて cloudflared のコンテナになる
+    client = _client(rate_limits=[(60, 1)])
+
+    assert _post(client, {"CF-Connecting-IP": "203.0.113.1"}).status_code == 200
+    assert _post(client, {"CF-Connecting-IP": "203.0.113.2"}).status_code == 200
+    assert _post(client, {"CF-Connecting-IP": "203.0.113.1"}).status_code == 429
+
+
+class FullQueue(AnalysisQueue):
+    @property
+    def full(self) -> bool:
+        return True
+
+
+def test_待ち行列が上限に達していれば503で断る() -> None:
+    res = _post(_client(queue=FullQueue()))
+
+    assert res.status_code == 503
+    assert "混んでいます" in res.json()["detail"]
