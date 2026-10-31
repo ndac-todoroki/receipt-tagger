@@ -48,11 +48,6 @@ function ProgressCard(props: {
   const elapsed = () => Math.max(0, (props.now - props.submittedAt) / 1000)
   const sinceEstimate = () => Math.max(0, (props.now - props.receivedAt) / 1000)
   const estimate = () => props.estimate
-  // 目安を超えても終わらないことがあるので、バーは95%で止めておく
-  const ratio = () => {
-    const e = estimate()
-    return e ? Math.min(sinceEstimate() / e, 0.95) : 0
-  }
   const queued = () => props.progress?.type === 'queued'
   const currentStage = () => {
     const p = props.progress
@@ -87,8 +82,18 @@ function ProgressCard(props: {
           )}
         </For>
       </ol>
+      {/* 時間ではなく段階で進める。終わった段階を塗り、今の段階は点滅させる */}
       <div class="bar" aria-hidden="true">
-        <div style={{ width: `${ratio() * 100}%` }} />
+        <For each={STAGES}>
+          {(_, i) => (
+            <div
+              classList={{
+                done: !queued() && i() < stageIndex(),
+                current: !queued() && i() === stageIndex(),
+              }}
+            />
+          )}
+        </For>
       </div>
       <p class="muted">
         経過 {Math.floor(elapsed())} 秒

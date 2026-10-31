@@ -199,16 +199,30 @@ button:disabled {
 }
 
 .bar {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
-  overflow: hidden;
+  display: flex;
+  gap: 4px;
 }
 
 .bar > div {
-  height: 100%;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.bar > div.done {
   background: var(--accent);
-  transition: width 0.5s linear;
+}
+
+.bar > div.current {
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -216,8 +230,8 @@ button:disabled {
     animation: none;
   }
 
-  .bar > div {
-    transition: none;
+  .bar > div.current {
+    animation: none;
   }
 }
 
