@@ -2,7 +2,8 @@
 
 確かめること: 空いていれば待たずに始める、先に来た依頼から1件ずつ処理する、
             待っている間は前に何件あるかと目安の時間を知らせる、処理の段階を知らせる、
-            待っている依頼が取り下げられたら後ろが繰り上がる、処理の失敗を伝える。
+            待っている依頼が取り下げられたら後ろが繰り上がる、処理の失敗を伝える、
+            待っている依頼が上限に達したら受け付けない。
 確かめないこと: 解析そのもの（パイプラインのテストで扱う）。
 """
 
@@ -12,7 +13,7 @@ from collections.abc import Callable
 
 import pytest
 
-from receipt_app.analysis_queue import AnalysisQueue, QueueEvent
+from receipt_app.analysis_queue import AnalysisQueue, QueueEvent, QueueFull
 
 Work = Callable[[Callable[[str], None]], str]
 
@@ -162,3 +163,39 @@ def test_処理に失敗したら例外を伝えて次の依頼に進む() -> No
         return await _collect(queue, _instant("r2"))
 
     assert asyncio.run(run())[-1].result == "r2"
+
+
+def test_待っている依頼の数を数える() -> None:
+    async def run() -> tuple[int, int]:
+        queue = AnalysisQueue()
+        first = Gate("r1")
+        t1 = asyncio.create_task(_collect(queue, first.work))
+        await _until(first.started.is_set)
+        before = queue.waiting
+        events = queue.run(_instant("r2"))
+        await anext(events)
+        after = queue.waiting
+        first.open()
+        await t1
+        await events.aclose()
+        return before, after
+
+    # 処理中の1件は数えない
+    assert asyncio.run(run()) == (0, 1)
+
+
+def test_待っている依頼が上限に達していたら受け付けない() -> None:
+    async def run() -> None:
+        queue = AnalysisQueue(max_waiting=1)
+        first = Gate("r1")
+        t1 = asyncio.create_task(_collect(queue, first.work))
+        await _until(first.started.is_set)
+        second = queue.run(_instant("r2"))
+        await anext(second)
+        with pytest.raises(QueueFull):
+            await _collect(queue, _instant("r3"))
+        first.open()
+        await t1
+        await second.aclose()
+
+    asyncio.run(run())
