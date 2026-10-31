@@ -93,9 +93,12 @@ sequenceDiagram
     participant Cache as キャッシュ
     participant Search as Nominatim
 
-    User->>Web: レシート画像をアップロード
+    User->>Web: レシート画像を選ぶ（選んだ時点で解析を始める）
     Web->>Inf: POST /api/analyze（画像）
-    Inf->>Inf: 領域抽出・補正（失敗時は原画像）
+    loop 前の依頼が終わるまで（来た順に1件ずつ処理する）
+        Inf-->>Web: 待ち順と目安の時間
+    end
+    Inf-->>Web: 開始・段階（読み取り／店／品目）を順に知らせる
     Inf->>VLM: 画像と指示文（JSONスキーマを指定）
     alt 応答が正しいJSON
         VLM-->>Inf: 店名・品目・小計・外税・合計
@@ -121,12 +124,16 @@ sequenceDiagram
 
     Inf->>Inf: 判定粒度を決定（genre_map.yaml）
     opt 品目ごとに判定する店
-        Inf->>Inf: 品目ジャンル分類（信頼度つき）
+        Inf->>VLM: 品名ごとにジャンルを選ばせる（enum に縛る。3回の多数決）
+        VLM-->>Inf: ジャンルと信頼度
     end
 
     Inf-->>Web: 結果JSON（画像は保持しない）
     Web-->>User: 表示（低信頼は候補から選択）
 ```
+
+- `/api/analyze` は、待ち順・段階・結果を1行1つの JSON（NDJSON）で順に返す。読み取りの失敗も最後の行で返す（送り始めた後なので HTTP の状態コードでは伝えられない）
+- ジョブ ID を返して問い合わせてもらう方式にしなかったのは、結果や画像をサーバーに残す期間ができるため
 
 ---
 
